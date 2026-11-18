@@ -1856,6 +1856,25 @@ end
 
 function M.toggle_setup() setSetup(not setup); end
 function M.in_setup() return setup; end
+
+-- Where a widget can sit between the party list and alliance 1 (the treasure pool summary), in screen pixels: the
+-- party list's right edge and top, and the bottom of alliance 1's last member row when that list sits above the
+-- party list (nil: none shown there). Nothing while the lists are hidden.
+function M.dock()
+    if (not visible) then return nil; end
+    local p = S.party;
+    local right, top = p.x + listSize(0), p.y;
+    local above = nil;
+    local a1 = S.alliance1;
+    if (not S.hideAlliance and a1.y < top and a1.x < right and a1.x + listSize(1) > p.x) then
+        local party, n = mm:GetParty(), 0;
+        for k = 6, 11 do
+            if (setup or party:GetMemberIsActive(k) ~= 0) then n = n + 1; end
+        end
+        if (n > 0) then above = a1.y + n * (S.lowfi and AL.h or A.h) * a1.scale; end
+    end
+    return right, top, above;
+end
 function M.lowfi() return S.lowfi == true; end
 function M.set_lowfi(on)
     if ((S.lowfi == true) == on) then return; end

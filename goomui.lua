@@ -275,7 +275,7 @@ local HELP = {
     '/goomui setup                   party list setup: drag lists, list options (again = save)',
     '/goomui lowfi | crew | perf     party: low-fi toggle / crew link status / 10 s timing',
     '/goomui tdebug                  party: target-marker diagnostics',
-    '/goomui pool [demo]             treasure pool window on/off / sample items',
+    '/goomui pool [demo|open|dock]   treasure pool on/off / sample items / full window / summary by the party',
     '/goomui look [next|prev|<preset>] colour preset (no word = show current)',
     '/goomui look shape soft|flat|glass | texture none|segmented|striped|quarters|scanline|fade | frame [on|off]',
     '/goomui look panel tinted|dark|clear|framed | opacity <0.25-2>',

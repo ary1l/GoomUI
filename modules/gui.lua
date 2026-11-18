@@ -88,6 +88,7 @@ local function tab_bar(c, bar)
     check(c, 'bar', 'Show debuffs on the targeted mob', 'show_debuffs', hook);
     check(c, 'bar', 'Debuffs below the HP bar (default: above)', 'debuffs_below', hook);
     check(c, 'bar', 'Show treasure pool window (lots and passes per member)', 'show_pool', hook);
+    check(c, 'bar', 'Treasure pool: one-line summary by the party list (click it for the window)', 'pool_dock', hook);
     slider(c, 'bar', 'Debuff icon size##thud_dbsz', 'debuff_icon', 12, 32, '%.0f', true, hook);
     slider(c, 'bar', 'Hold finished cast / JA (s)##thud_linger', 'cast_linger', 0.5, 6.0, '%.1f', false, hook);
 

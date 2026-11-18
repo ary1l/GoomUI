@@ -62,9 +62,14 @@ gap above it, so a mob's row and panel read as one block. Bar tab:
 
 ## Treasure pool
 
-Own window, shown while the pool has items (Bar tab: *Show treasure pool window*; `/goomui pool demo` for sample
-items). Drag it anywhere off the buttons; the spot is saved. Per item: name, time left, then each member's lot high
-to low (current leader gold, yours green), `pass:` names, and `waiting:` for members in your zone who have not acted.
+Shown while the pool has items (Bar tab: *Show treasure pool window*; `/goomui pool demo` for sample items).
+
+- **Summary** (default): one line between the party list and alliance 1, `Pool 8  3 to lot  4:31` (items, how many
+  you have not acted on, soonest time left), outlined for a few seconds when something drops. Click it to show or
+  hide the window. Off (Bar tab, or `/goomui pool dock`): the window alone, as before.
+- **Window:** drag it anywhere off the buttons; the spot is saved. Per item: name, time left, then each member's lot
+  high to low (current leader gold, yours green), `pass:` names, and `waiting N` for members in your zone who have
+  not acted (names on hover).
 
 - Buttons: **Lot** (until you act on the item), **Pass** (until you pass), **Lot all** (every item you have not acted
   on), **Pass all** (click twice within 3 s). They send what the game's treasure menu sends (0x041 / 0x042,

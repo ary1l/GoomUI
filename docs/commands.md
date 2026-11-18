@@ -31,7 +31,9 @@
 
 | Command | Does |
 |---|---|
-| `/goomui pool` | window on / off (also Bar tab) |
+| `/goomui pool` | treasure pool on / off (also Bar tab) |
+| `/goomui pool open` | show / hide the window (same as clicking the summary) |
+| `/goomui pool dock` | summary by the party list on / off (off: the window alone) |
 | `/goomui pool demo` | sample items, to place it (drag the window; buttons send nothing in the demo) |
 
 ## Rings and GEO

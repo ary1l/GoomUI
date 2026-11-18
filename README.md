@@ -11,7 +11,7 @@ look and saved per character.
 |---|---|
 | **Party** | party + alliance list, buff icons in game order, debuffs framed, distance, range dimming, crew recasts on hover |
 | **Target bar** | target, sub-target and pet HP; the mob's debuffs with timers (hover: name, time left); cast, item, job ability and menu-recast panels; tint and stripe by target kind |
-| **Treasure pool** | items in the pool, time left, each member's lot (high to low, leader gold), passes, who still has to act |
+| **Treasure pool** | a one-line summary by the party list (click for the window): items, time left, each member's lot (high to low, leader gold), passes, who still has to act |
 | **Rings** | ground rings under target / sub-target with facing arrow and range fill; GEO bubble rings for your group |
 | **AAEV** | auto-attack chart as one line under the chat log (or under the target bar): per-round bars, last round, accuracy, crit, multi-attack (DA/TA/QA) |
 | **Look** | one bar style for everything; 30 colour presets; bar shape, texture and frame combine freely; panel styles (Look tab) |

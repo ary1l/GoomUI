@@ -16,6 +16,9 @@
                      0x0D2; items already in the pool at load / zone-in show no timer.
     Lots made before goomui loaded (or before you zoned in) are not known; the leader still comes from memory.
 
+    Docked (pool_dock, the default): a one-line summary (items, how many you have not acted on, soonest time left)
+    sits between the party list and alliance 1; clicking it shows or hides the full window. Not docked: the window.
+
     Buttons (lot / pass, lot all / pass all) send what the client sends from its own treasure menu:
       0x041 ........ XiPackets GP_CLI_COMMAND_TROPHY_ENTRY (size 0x08): 0x04 TrophyItemIndex, 0x05 PropertyItemIndex.
                      PropertyItemIndex sent as 0, as XIUI treasurepool/actions.lua does.
@@ -264,7 +267,10 @@ local function draw_row(r, party, myName, myZone)
                 if (nm ~= nil and nm ~= '' and not acted[nm]) then w[#w + 1] = nm; end
             end
         end
-        if (#w > 0) then inline(COL.wait, 'waiting: ' .. table.concat(w, ', '), first); first = false; end
+        if (#w > 0) then -- a count; the names on hover (an alliance's 17 names were most of the window)
+            inline(COL.wait, ('waiting %d'):fmt(#w), first); first = false;
+            if (imgui.IsItemHovered()) then imgui.SetTooltip(table.concat(w, ', ')); end
+        end
     end
     if (first) then imgui.TextColored(COL.wait, 'no lots yet'); end
     imgui.Unindent(8);
@@ -296,10 +302,89 @@ local function draw_title(n)
     end
 end
 
+------------------------------------------------------------
+-- summary (docked between the party list and alliance 1)
+------------------------------------------------------------
+local CHIP_FLAGS = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize,
+    ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoMove);
+local chipW, chipH = 150, 20; -- its size last frame (placement uses it)
+local chip_open = { true };
+
+local function dock()
+    local party = package.loaded['modules/party'];
+    if (party == nil or party.dock == nil) then return nil; end
+    return party.dock();
+end
+
+local function summary(n) -- items you have not acted on, soonest time left (nil: none timed), newest drop seen
+    local act, soon, newest = 0, nil, nil;
+    for i = 1, n do
+        local r = rows[i];
+        if (r.my == 0) then act = act + 1; end
+        local seen = r.h.seen;
+        if (seen ~= nil) then
+            local left = math.max(0, POOL_SECS - (now() - seen));
+            if (soon == nil or left < soon) then soon = left; end
+            if (newest == nil or seen > newest) then newest = seen; end
+        end
+    end
+    return act, soon, newest;
+end
+
+-- Right-aligned to the party list, centred in the gap under alliance 1's last member (else just above the party
+-- list); with the lists hidden, just above the window's saved spot.
+local function draw_chip(n)
+    local right, top, above = dock();
+    local x, y = cfg.pool_x, cfg.pool_y - chipH - 4;
+    if (right ~= nil) then
+        x = math.floor(right - chipW);
+        if (above ~= nil and (top - above) >= chipH + 4) then
+            y = math.floor(above + ((top - above) - chipH) / 2);
+        else
+            y = math.floor(top - chipH - 2);
+        end
+    end
+    imgui.SetNextWindowPos({ x, y }, ImGuiCond_Always);
+    chip_open[1] = true;
+    if (imgui.Begin('##goomui_pool_chip', chip_open, CHIP_FLAGS)) then
+        local wx, wy = imgui.GetWindowPos();
+        local ww, wh = imgui.GetWindowSize();
+        chipW, chipH = ww, wh;
+        local act, soon, newest = summary(n);
+        local dl = imgui.GetWindowDrawList();
+        dl:AddRectFilled({ wx, wy }, { wx + ww, wy + wh }, theme.scale_alpha(PANEL_BG, theme.panel_alpha), 4.0);
+        dl:AddRectFilled({ wx, wy + 2 }, { wx + 3, wy + wh - 2 }, ACCENT);
+        if (newest ~= nil and now() - newest < 4) then -- a new drop: outlined for a few seconds
+            dl:AddRect({ wx, wy }, { wx + ww, wy + wh }, ACCENT, 4.0, 0, 1.5);
+        end
+        imgui.TextColored(COL.title, (demo and 'Pool (demo) ' or 'Pool ') .. n);
+        if (act > 0) then imgui.SameLine(0, 8); imgui.TextColored(COL.me, act .. ' to lot'); end
+        if (soon ~= nil) then
+            imgui.SameLine(0, 8);
+            imgui.TextColored(soon < 60 and COL.urgent or COL.timer, ('%d:%02d'):fmt(math.floor(soon / 60), math.floor(soon % 60)));
+        end
+        imgui.SameLine(0, 8);
+        imgui.TextColored(COL.wait, cfg.pool_open and '-' or '+');
+        if (imgui.IsWindowHovered()) then
+            imgui.SetTooltip(cfg.pool_open and 'Click: hide the pool window' or 'Click: show the pool window');
+            if (imgui.IsMouseClicked(0)) then
+                cfg.pool_open = not cfg.pool_open;
+                placed = false;
+                pcall(settings.save, 'bar');
+            end
+        end
+    end
+    imgui.End();
+end
+
 function M.render()
     if (cfg == nil or cfg.show_pool == false) then return; end
     local n = demo and demo_rows() or read_pool();
     if (n == 0) then placed = false; return; end
+    if (cfg.pool_dock ~= false) then
+        draw_chip(n);
+        if (not cfg.pool_open) then placed = false; return; end
+    end
 
     local party = AshitaCore:GetMemoryManager():GetParty();
     local myName = demo and 'Member1' or (party:GetMemberName(0) or '');
@@ -333,10 +418,20 @@ end
 
 function M.set_cfg(t) cfg = t; placed = false; end
 
--- /goomui pool [demo]
+-- /goomui pool [demo|open|dock]
 function M.command(arg)
     if (arg == 'demo') then demo = not demo; return demo and 'Treasure pool demo on.' or 'Treasure pool demo off.'; end
     if (cfg == nil) then return nil; end
+    if (arg == 'open') then
+        cfg.pool_open, placed = not cfg.pool_open, false;
+        pcall(settings.save, 'bar');
+        return 'Treasure pool window ' .. (cfg.pool_open and 'shown.' or 'hidden (summary only).');
+    elseif (arg == 'dock') then
+        cfg.pool_dock = not (cfg.pool_dock ~= false);
+        pcall(settings.save, 'bar');
+        return cfg.pool_dock and 'Treasure pool: summary by the party list (click it for the window).'
+            or 'Treasure pool: window only.';
+    end
     cfg.show_pool = not (cfg.show_pool ~= false);
     pcall(settings.save, 'bar');
     return 'Treasure pool window ' .. (cfg.show_pool and 'on.' or 'off.');
