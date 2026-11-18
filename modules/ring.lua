@@ -174,8 +174,8 @@ local default_settings = T{
     geo_indi_jp = -1,       -- Indicolure duration JP rank from 0x08D; -1 = not seen yet
     -- Target cursor over the target's head (see Target cursor below)
     cursor       = true,
-    cursor_color = 'white',  -- 'white' or a goomui palette colour (M.CURSOR_COLORS), following the colour preset
-    cursor_sub   = 'mp',     -- the first target while you sub-target, and item / <stnpc> / <stpc> picks
+    cursor_color = 'mp',     -- 'white' or a goomui palette colour (M.CURSOR_COLORS), following the colour preset
+    cursor_sub   = 'tp_rdy', -- the first target while you sub-target, and item / <stnpc> / <stpc> picks
     cursor_size  = 1.0,
     migrated    = false,    -- old targetring settings imported
 };
@@ -2047,60 +2047,83 @@ local function ui_blocks_rings()
 end
 
 ----------------------------------------------------------------------------------------------------
--- Target cursor: a rounded, down-pointing marker over the target's head, in a goomui palette colour (or white) that
--- follows the colour preset. While you sub-target, the first target keeps one in the sub colour, raised 10 px; item /
--- <stnpc> / <stpc> picks (sub-target flags 512, 18, 525) take the sub colour too. Drawn in this pass after the rings,
--- without the depth test, from shapes built once. Placement as in the customtarget addon (Jyouya): the head is skeleton
--- bone 2 (where the game puts the name); doors and other objects (type 3) use their own position, 8 px higher.
--- Rebuilt here: no customtarget code or images.
+-- Target cursor: a rounded, down-pointing gem over the target's head (light border, dark ring, lit facets, soft edges),
+-- in a goomui palette colour (or white) that follows the colour preset. While you sub-target, the first target keeps
+-- one in the sub colour, raised 10 px; item / <stnpc> / <stpc> picks (sub-target flags 512, 18, 525) take the sub
+-- colour too. Drawn in this pass after the rings, without the depth test, from shapes built once. Placement as in the
+-- customtarget addon (Jyouya): the head is skeleton bone 2 (where the game puts the name); doors and other objects
+-- (type 3) use their own position, 8 px higher. Rebuilt here: no customtarget code or images.
 ----------------------------------------------------------------------------------------------------
 M.CURSOR_COLORS = { 'white', 'hp_full', 'hp_50', 'hp_0', 'mp', 'tp', 'tp_rdy', 'tp_max', 'spell', 'item', 'hit',
     'crit', 'ws', 'heal', 'counter', 'r3' };
-local CUR_W, CUR_H = 30, 20;                      -- px at size 1 (customtarget's cursor)
-local CUR_R, CUR_EDGE, CUR_RIM = 3.0, 1.6, 1.4;   -- corner radius, dark outline and light rim (px at size 1)
-local CUR_SEGS  = 4;                              -- arc steps per corner
-local CUR_RAISE = 10;                             -- px: the first target's cursor while sub-targeting
-local CUR_WHITE = { 245, 245, 245 };
-local cur_layers, cur_ix, cur_iy = nil, 0, 0;     -- outline / rim / core points around the incentre, at size 1
+local CUR_W, CUR_H = 30, 20;    -- px at size 1 (customtarget's cursor box)
+local CUR_R      = 4.5;         -- corner radius of the outer edge
+local CUR_BORDER = 1.8;         -- light border, then a dark ring, then the faceted core (px at size 1)
+local CUR_RING   = 2.5;
+local CUR_SEGS   = 4;           -- arc steps per corner
+local CUR_FRINGE = 1.0;         -- screen px each edge fades out over (smooth edges at any size)
+local CUR_RAISE  = 10;          -- px: the first target's cursor while sub-targeting
+local CUR_WHITE  = { 245, 245, 245 };
+-- The skeleton: the triangle (top left, top right, bottom point) that, grown by CUR_R, fills the box exactly.
+local CUR_V = { { CUR_R, CUR_R }, { CUR_W - CUR_R, CUR_R }, { CUR_W / 2, CUR_H - CUR_R } };
+-- Core facets, lit from the top left: per facet, its two corners and the lift (+ toward white, - toward black) at
+-- the centre and at each corner; edges top, right, left.
+local CUR_FACETS = { { 1, 2, 0.45, 0.30, 0.05 }, { 2, 3, 0.20, -0.15, -0.45 }, { 3, 1, 0.45, -0.30, 0.30 } };
+local cur = nil;                -- the shapes at size 1, built once (cursor_shapes)
 
--- The box triangle (top corners, bottom point) shrunk about its incentre by the corner radius, then grown back per
--- layer with round corners: outline, rim, core. Points are offsets from the incentre.
-local function cursor_layers()
-    local W, H = CUR_W, CUR_H;
-    local side = math.sqrt((W / 2) ^ 2 + H ^ 2);
-    local per = W + 2 * side;
-    local ix, iy, r = (side * W + W * W / 2) / per, W * H / per, W * H / per;
-    local k = (r - CUR_R) / r;
-    local V = { { -ix * k, -iy * k }, { (W - ix) * k, -iy * k }, { (W / 2 - ix) * k, (H - iy) * k } };
-    local function normal(px, py, qx, qy) -- an edge's outward normal angle (its midpoint lies away from the incentre)
-        local nx, ny = qy - py, -(qx - px);
-        if (nx * (px + qx) + ny * (py + qy) < 0) then nx, ny = -nx, -ny; end
-        return math.atan2(ny, nx);
+-- The outline d px inside the outer edge, in box px: the skeleton grown by CUR_R - d, or past that, the skeleton
+-- shrunk about its incentre (sharp). Returns its points { x, y, outward normal x, y }, its sharp triangle and edge
+-- normal angles, and the incentre.
+local function cursor_outline(d)
+    local V = CUR_V;
+    local la = math.sqrt((V[2][1] - V[3][1]) ^ 2 + (V[2][2] - V[3][2]) ^ 2); -- sides opposite each corner
+    local lb = math.sqrt((V[3][1] - V[1][1]) ^ 2 + (V[3][2] - V[1][2]) ^ 2);
+    local lc = math.sqrt((V[1][1] - V[2][1]) ^ 2 + (V[1][2] - V[2][2]) ^ 2);
+    local per = la + lb + lc;
+    local ox = (la * V[1][1] + lb * V[2][1] + lc * V[3][1]) / per;
+    local oy = (la * V[1][2] + lb * V[2][2] + lc * V[3][2]) / per;
+    local rin = math.abs((V[2][1] - V[1][1]) * (V[3][2] - V[1][2]) - (V[3][1] - V[1][1]) * (V[2][2] - V[1][2])) / per;
+    local rad, k = CUR_R - d, 1.0;
+    if (rad < 0) then k, rad = (rin + rad) / rin, 0; end
+    local T = { };
+    for i = 1, 3 do T[i] = { ox + (V[i][1] - ox) * k, oy + (V[i][2] - oy) * k }; end
+    local N = { }; -- N[i]: the outward normal angle of edge T[i] -> T[i + 1]
+    for i = 1, 3 do
+        local a, b = T[i], T[i % 3 + 1];
+        local nx, ny = b[2] - a[2], -(b[1] - a[1]);
+        if (nx * ((a[1] + b[1]) / 2 - ox) + ny * ((a[2] + b[2]) / 2 - oy) < 0) then nx, ny = -nx, -ny; end
+        N[i] = math.atan2(ny, nx);
     end
-    local layers = { };
-    for li, grow in ipairs({ CUR_R, CUR_R - CUR_EDGE, CUR_R - CUR_EDGE - CUR_RIM }) do
-        local pts = { };
-        for i = 1, 3 do
-            local a, b, c = V[(i + 1) % 3 + 1], V[i], V[i % 3 + 1]; -- previous, this, next corner
-            local a1, a2 = normal(a[1], a[2], b[1], b[2]), normal(b[1], b[2], c[1], c[2]);
-            local d = a2 - a1;
-            if (d > math.pi) then d = d - 2 * math.pi; elseif (d < -math.pi) then d = d + 2 * math.pi; end
-            for st = 0, CUR_SEGS do
-                local t = a1 + d * st / CUR_SEGS;
-                pts[#pts + 1] = { b[1] + grow * math.cos(t), b[2] + grow * math.sin(t) };
-            end
+    local pts = { };
+    for i = 1, 3 do
+        local a1, a2 = N[(i + 1) % 3 + 1], N[i]; -- incoming edge, outgoing edge
+        local da = a2 - a1;
+        if (da > math.pi) then da = da - 2 * math.pi; elseif (da < -math.pi) then da = da + 2 * math.pi; end
+        for st = 0, CUR_SEGS do
+            local t = a1 + da * st / CUR_SEGS;
+            local nx, ny = math.cos(t), math.sin(t);
+            pts[#pts + 1] = { T[i][1] + rad * nx, T[i][2] + rad * ny, nx, ny };
         end
-        layers[li] = pts;
     end
-    return layers, ix, iy;
+    return pts, T, N, ox, oy;
 end
 
-local function cursor_argb(key, alpha, lift)
-    local c = (key ~= 'white') and theme.P[key] or nil;
-    if (c == nil) then c = CUR_WHITE; end
+local function cursor_shapes()
+    local border, _, _, ox, oy = cursor_outline(0);
+    local _, corners, normals = cursor_outline(CUR_BORDER + CUR_RING);
+    return { border = border, ring = cursor_outline(CUR_BORDER), corners = corners, normals = normals,
+        ox = ox, oy = oy };
+end
+
+-- The palette colour (or white) lifted toward white (t > 0) or darkened toward black (t < 0), as argb.
+local function cursor_tint(c, t, alpha)
     local r, g, b = c[1], c[2], c[3];
-    if (lift ~= nil) then r, g, b = r + (255 - r) * lift, g + (255 - g) * lift, b + (255 - b) * lift; end
-    return theme.argb(math.floor(r), math.floor(g), math.floor(b), alpha);
+    if (t > 0) then
+        r, g, b = r + (255 - r) * t, g + (255 - g) * t, b + (255 - b) * t;
+    elseif (t < 0) then
+        r, g, b = r * (1 + t), g * (1 + t), b * (1 + t);
+    end
+    return theme.argb(math.floor(r + 0.5), math.floor(g + 0.5), math.floor(b + 0.5), alpha);
 end
 
 -- The head point (x, height, z) and extra px above it, or nil. Doors and other objects (type 3): their own position;
@@ -2133,18 +2156,31 @@ local function cursor_anchor(ent, index)
     local g = p + 0x30 + 0x04 + 0x1E * bones + 0x04 + 2 * 0x1A + 0x0E; -- bone 2: its offset from the model root
     local f = ashita.memory.read_float;
     local dx, dh, dz = f(g), f(g + 0x04), f(g + 0x08);
-    if (dx ~= dx or dh ~= dh or dz ~= dz or math.abs(dx) > 20 or math.abs(dz) > 20 or math.abs(dh) > 40) then return nil; end
+    if (dx ~= dx or dh ~= dh or dz ~= dz) then return nil; end
+    if (math.abs(dx) > 20 or math.abs(dz) > 20 or math.abs(dh) > 40) then return nil; end
     return x + dx, h + dh, z + dz, 0;
 end
 
-local function cursor_fan(pts, cx, cy, s, color)
+-- A filled outline: a fan from the incentre, then a fringe fading to clear over CUR_FRINGE px outside its edge.
+-- bx, by: the box's top left on screen; s: size.
+local function cursor_shape(pts, bx, by, s, color)
+    local clear = bit.band(color, 0x00FFFFFF);
+    local cx, cy = bx + cur.ox * s, by + cur.oy * s;
     local n = #pts;
     for i = 1, n do
         local a, b = pts[i], pts[i % n + 1];
+        local ax, ay, qx, qy = bx + a[1] * s, by + a[2] * s, bx + b[1] * s, by + b[2] * s;
         room();
         vert(cx, cy, 0.0, 1.0, color);
-        vert(cx + a[1] * s, cy + a[2] * s, 0.0, 1.0, color);
-        vert(cx + b[1] * s, cy + b[2] * s, 0.0, 1.0, color);
+        vert(ax, ay, 0.0, 1.0, color);
+        vert(qx, qy, 0.0, 1.0, color);
+        room();
+        vert(ax, ay, 0.0, 1.0, color);
+        vert(qx, qy, 0.0, 1.0, color);
+        vert(qx + b[3] * CUR_FRINGE, qy + b[4] * CUR_FRINGE, 0.0, 1.0, clear);
+        vert(ax, ay, 0.0, 1.0, color);
+        vert(qx + b[3] * CUR_FRINGE, qy + b[4] * CUR_FRINGE, 0.0, 1.0, clear);
+        vert(ax + a[3] * CUR_FRINGE, ay + a[4] * CUR_FRINGE, 0.0, 1.0, clear);
     end
 end
 
@@ -2154,13 +2190,35 @@ local function draw_cursor(index, key, raise)
     if (x == nil) then return; end
     local sx, sy = project(x, h, z);
     if (sx == nil) then return; end
-    if (cur_layers == nil) then cur_layers, cur_ix, cur_iy = cursor_layers(); end
+    if (cur == nil) then cur = cursor_shapes(); end
     local s = cfg.cursor_size or 1.0;
-    local cx = sx + (cur_ix - CUR_W / 2) * s;          -- the box centred over the head point, its bottom on it
-    local cy = sy + (cur_iy - CUR_H - gap - raise) * s;
-    cursor_fan(cur_layers[1], cx, cy, s, 0xD8000000);
-    cursor_fan(cur_layers[2], cx, cy, s, cursor_argb(key, 0xF0, 0.45));
-    cursor_fan(cur_layers[3], cx, cy, s, cursor_argb(key, 0xF0, nil));
+    local bx, by = sx - CUR_W / 2 * s, sy - (CUR_H + gap + raise) * s; -- centred over the head point, bottom on it
+    local c = (key ~= 'white') and theme.P[key] or nil;
+    if (c == nil) then c = CUR_WHITE; end
+
+    cursor_shape(cur.border, bx, by, s, cursor_tint(c, 0.25, 0xFF));
+    cursor_shape(cur.ring, bx, by, s, cursor_tint(c, -0.85, 0xFF));
+
+    -- The core: three facets meeting at the incentre, each edge fading into the ring.
+    local cx, cy = bx + cur.ox * s, by + cur.oy * s;
+    local C, N = cur.corners, cur.normals;
+    for _, f in ipairs(CUR_FACETS) do
+        local a, b = C[f[1]], C[f[2]];
+        local ax, ay, qx, qy = bx + a[1] * s, by + a[2] * s, bx + b[1] * s, by + b[2] * s;
+        local co, ca, cb = cursor_tint(c, f[3], 0xFF), cursor_tint(c, f[4], 0xFF), cursor_tint(c, f[5], 0xFF);
+        local nx, ny = math.cos(N[f[1]]) * CUR_FRINGE, math.sin(N[f[1]]) * CUR_FRINGE;
+        room();
+        vert(cx, cy, 0.0, 1.0, co);
+        vert(ax, ay, 0.0, 1.0, ca);
+        vert(qx, qy, 0.0, 1.0, cb);
+        room();
+        vert(ax, ay, 0.0, 1.0, ca);
+        vert(qx, qy, 0.0, 1.0, cb);
+        vert(qx + nx, qy + ny, 0.0, 1.0, bit.band(cb, 0x00FFFFFF));
+        vert(ax, ay, 0.0, 1.0, ca);
+        vert(qx + nx, qy + ny, 0.0, 1.0, bit.band(cb, 0x00FFFFFF));
+        vert(ax + nx, ay + ny, 0.0, 1.0, bit.band(ca, 0x00FFFFFF));
+    end
 end
 
 --------------------------------------------------------------------------------
