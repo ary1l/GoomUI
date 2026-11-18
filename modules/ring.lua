@@ -177,6 +177,9 @@ local default_settings = T{
     cursor_color = 'mp',     -- 'white' or a goomui palette colour (M.CURSOR_COLORS), following the colour preset
     cursor_sub   = 'tp_rdy', -- the first target while you sub-target, and item / <stnpc> / <stpc> picks
     cursor_size  = 1.0,
+    cursor_style = 'gem',    -- M.CURSOR_STYLES
+    cursor_float = false,    -- drifts up and down
+    cursor_spin  = true,     -- the crystal turns
     migrated    = false,    -- old targetring settings imported
 };
 M.defaults = default_settings;
@@ -2054,49 +2057,75 @@ end
 -- customtarget addon (Jyouya): the head is skeleton bone 2 (where the game puts the name); doors and other objects
 -- (type 3) use their own position, 8 px higher. Rebuilt here: no customtarget code or images.
 ----------------------------------------------------------------------------------------------------
-M.CURSOR_COLORS = { 'white', 'hp_full', 'hp_50', 'hp_0', 'mp', 'tp', 'tp_rdy', 'tp_max', 'spell', 'item', 'hit',
-    'crit', 'ws', 'heal', 'counter', 'r3' };
-local CUR_W, CUR_H = 30, 20;    -- px at size 1 (customtarget's cursor box)
+M.CURSOR_COLORS = { 'white', 'kind', 'hp_full', 'hp_50', 'hp_0', 'mp', 'tp', 'tp_rdy', 'tp_max', 'spell', 'item',
+    'hit', 'crit', 'ws', 'heal', 'counter', 'r3' };
+M.CURSOR_STYLES = { 'gem', 'flat', 'hollow', 'crystal' };
+-- One-click looks: name, style, colour, sub-target colour.
+M.CURSOR_PRESETS = {
+    { 'goomui',  'gem',     'mp',    'tp_rdy' },
+    { 'Classic', 'gem',     'white', 'mp' },     -- white, blue when picking (customtarget's colours)
+    { 'Crystal', 'crystal', 'mp',    'tp_rdy' },
+    { 'Minimal', 'hollow',  'white', 'mp' },
+};
+local CUR_W, CUR_H = 30, 20;    -- the box at size 1 (customtarget's cursor)
 local CUR_R      = 4.5;         -- corner radius of the outer edge
-local CUR_BORDER = 1.8;         -- light border, then a dark ring, then the faceted core (px at size 1)
+local CUR_BORDER = 1.8;         -- light border, then a dark ring, then the core (px at size 1)
 local CUR_RING   = 2.5;
 local CUR_SEGS   = 4;           -- arc steps per corner
 local CUR_FRINGE = 1.0;         -- screen px each edge fades out over (smooth edges at any size)
 local CUR_RAISE  = 10;          -- px: the first target's cursor while sub-targeting
+local CUR_FLOAT, CUR_FLOAT_SECS = 2.5, 1.6; -- Float: px it drifts up, seconds per drift
 local CUR_WHITE  = { 245, 245, 245 };
 -- The skeleton: the triangle (top left, top right, bottom point) that, grown by CUR_R, fills the box exactly.
 local CUR_V = { { CUR_R, CUR_R }, { CUR_W - CUR_R, CUR_R }, { CUR_W / 2, CUR_H - CUR_R } };
--- Core facets, lit from the top left: per facet, its two corners and the lift (+ toward white, - toward black) at
--- the centre and at each corner; edges top, right, left.
-local CUR_FACETS = { { 1, 2, 0.45, 0.30, 0.05 }, { 2, 3, 0.20, -0.15, -0.45 }, { 3, 1, 0.45, -0.30, 0.30 } };
-local cur = nil;                -- the shapes at size 1, built once (cursor_shapes)
+-- Core shading: per facet (edges top, right, left), its two corners and the lift (+ toward white, - toward black)
+-- at the centre and at each corner. Gem: facets lit from the top left. Flat: one smooth gradient.
+local CUR_FACETS = {
+    gem  = { { 1, 2, 0.45, 0.30, 0.05 }, { 2, 3, 0.20, -0.15, -0.45 }, { 3, 1, 0.45, -0.30, 0.30 } },
+    flat = { { 1, 2, 0.05, 0.15, 0.15 }, { 2, 3, 0.05, 0.15, -0.20 }, { 3, 1, 0.05, -0.20, 0.15 } },
+};
+-- Hollow: a colour band with dark edges, see-through inside (insets from the outer edge, px at size 1).
+local HOL_OUT, HOL_IN, HOL_END = 0.9, 3.6, 4.5;
+-- Crystal: an eight-faced crystal (a square bipyramid) seen side on, turning about its upright axis (Spin).
+local CRY_A, CRY_UP, CRY_DOWN = 9.0, 8.0, 17.0;    -- equator radius, apex above / below it (px at size 1)
+local CRY_EDGE  = 1.4;                             -- dark outline
+local CRY_TURN  = 8.0;                             -- seconds per turn
+local CRY_ANGLE = 0.35;                            -- radians, when still
+local CRY_LIGHT = { -0.45, -0.65, 0.61 };          -- toward the light: left, up, toward you
+local CRY_W, CRY_H = 2 * (CRY_A + CRY_EDGE), CRY_UP + CRY_DOWN + 2 * CRY_EDGE; -- its box
+local cur = nil;                -- the triangle styles' shapes at size 1, built once (cursor_shapes)
 
--- The outline d px inside the outer edge, in box px: the skeleton grown by CUR_R - d, or past that, the skeleton
--- shrunk about its incentre (sharp). Returns its points { x, y, outward normal x, y }, its sharp triangle and edge
--- normal angles, and the incentre.
-local function cursor_outline(d)
-    local V = CUR_V;
-    local la = math.sqrt((V[2][1] - V[3][1]) ^ 2 + (V[2][2] - V[3][2]) ^ 2); -- sides opposite each corner
-    local lb = math.sqrt((V[3][1] - V[1][1]) ^ 2 + (V[3][2] - V[1][2]) ^ 2);
-    local lc = math.sqrt((V[1][1] - V[2][1]) ^ 2 + (V[1][2] - V[2][2]) ^ 2);
-    local per = la + lb + lc;
-    local ox = (la * V[1][1] + lb * V[2][1] + lc * V[3][1]) / per;
-    local oy = (la * V[1][2] + lb * V[2][2] + lc * V[3][2]) / per;
-    local rin = math.abs((V[2][1] - V[1][1]) * (V[3][2] - V[1][2]) - (V[3][1] - V[1][1]) * (V[2][2] - V[1][2])) / per;
-    local rad, k = CUR_R - d, 1.0;
-    if (rad < 0) then k, rad = (rin + rad) / rin, 0; end
-    local T = { };
-    for i = 1, 3 do T[i] = { ox + (V[i][1] - ox) * k, oy + (V[i][2] - oy) * k }; end
-    local N = { }; -- N[i]: the outward normal angle of edge T[i] -> T[i + 1]
-    for i = 1, 3 do
-        local a, b = T[i], T[i % 3 + 1];
+-- The outline d px inside a rounded convex shape (the skeleton V grown by R), in box px: V grown by R - d, or past
+-- that, V inset (sharp). Returns its points { x, y, outward normal x, y }, its sharp polygon, its edge normal angles
+-- and the skeleton's centre (a triangle's incentre).
+local function cursor_outline(V, R, d)
+    local n = #V;
+    local ox, oy = 0, 0;
+    if (n == 3) then
+        local la = math.sqrt((V[2][1] - V[3][1]) ^ 2 + (V[2][2] - V[3][2]) ^ 2); -- sides opposite each corner
+        local lb = math.sqrt((V[3][1] - V[1][1]) ^ 2 + (V[3][2] - V[1][2]) ^ 2);
+        local lc = math.sqrt((V[1][1] - V[2][1]) ^ 2 + (V[1][2] - V[2][2]) ^ 2);
+        local per = la + lb + lc;
+        ox = (la * V[1][1] + lb * V[2][1] + lc * V[3][1]) / per;
+        oy = (la * V[1][2] + lb * V[2][2] + lc * V[3][2]) / per;
+    else
+        for i = 1, n do ox, oy = ox + V[i][1] / n, oy + V[i][2] / n; end
+    end
+    local N = { }; -- N[i]: the outward normal angle of edge V[i] -> V[i + 1]
+    for i = 1, n do
+        local a, b = V[i], V[i % n + 1];
         local nx, ny = b[2] - a[2], -(b[1] - a[1]);
         if (nx * ((a[1] + b[1]) / 2 - ox) + ny * ((a[2] + b[2]) / 2 - oy) < 0) then nx, ny = -nx, -ny; end
         N[i] = math.atan2(ny, nx);
     end
-    local pts = { };
-    for i = 1, 3 do
-        local a1, a2 = N[(i + 1) % 3 + 1], N[i]; -- incoming edge, outgoing edge
+    local rad, inset = R - d, 0;
+    if (rad < 0) then rad, inset = 0, d - R; end
+    local T, pts = { }, { };
+    for i = 1, n do
+        local a1, a2 = N[(i - 2) % n + 1], N[i]; -- incoming edge, outgoing edge
+        local ux, uy, vx, vy = math.cos(a1), math.sin(a1), math.cos(a2), math.sin(a2);
+        local m = inset / (1 + ux * vx + uy * vy); -- both edges moved in: the mitre point
+        T[i] = { V[i][1] - (ux + vx) * m, V[i][2] - (uy + vy) * m };
         local da = a2 - a1;
         if (da > math.pi) then da = da - 2 * math.pi; elseif (da < -math.pi) then da = da + 2 * math.pi; end
         for st = 0, CUR_SEGS do
@@ -2109,10 +2138,11 @@ local function cursor_outline(d)
 end
 
 local function cursor_shapes()
-    local border, _, _, ox, oy = cursor_outline(0);
-    local _, corners, normals = cursor_outline(CUR_BORDER + CUR_RING);
-    return { border = border, ring = cursor_outline(CUR_BORDER), corners = corners, normals = normals,
-        ox = ox, oy = oy };
+    local function at(d) return (cursor_outline(CUR_V, CUR_R, d)); end
+    local border, _, _, ox, oy = cursor_outline(CUR_V, CUR_R, 0);
+    local _, corners, normals = cursor_outline(CUR_V, CUR_R, CUR_BORDER + CUR_RING);
+    return { border = border, ring = at(CUR_BORDER), corners = corners, normals = normals, ox = ox, oy = oy,
+        hol = { border, at(HOL_OUT), at(HOL_IN), at(HOL_END) } };
 end
 
 -- The palette colour (or white) lifted toward white (t > 0) or darkened toward black (t < 0), as argb.
@@ -2125,6 +2155,13 @@ local function cursor_tint(c, t, alpha)
     end
     return theme.argb(math.floor(r + 0.5), math.floor(g + 0.5), math.floor(b + 0.5), alpha);
 end
+
+-- Target kind: the ring colours (mobs, players, NPCs) as rgb.
+local function argb_rgb(v)
+    return { bit.band(bit.rshift(v, 16), 0xFF), bit.band(bit.rshift(v, 8), 0xFF), bit.band(v, 0xFF) };
+end
+local CUR_KIND = { [COLOR_MOB] = argb_rgb(COLOR_MOB), [COLOR_PC] = argb_rgb(COLOR_PC),
+    [COLOR_NPC] = argb_rgb(COLOR_NPC) };
 
 -- The head point (x, height, z) and extra px above it, or nil. Doors and other objects (type 3): their own position;
 -- an unrendered player (render flags 0): where last seen; anything else unrendered: none (no skeleton read).
@@ -2161,48 +2198,61 @@ local function cursor_anchor(ent, index)
     return x + dx, h + dh, z + dz, 0;
 end
 
--- A filled outline: a fan from the incentre, then a fringe fading to clear over CUR_FRINGE px outside its edge.
--- bx, by: the box's top left on screen; s: size.
-local function cursor_shape(pts, bx, by, s, color)
+-- Drawing in box px: bx, by the box's top left on screen, s the size.
+local function cursor_fan(pts, cx, cy, bx, by, s, color) -- filled, from a centre point
+    local n = #pts;
+    for i = 1, n do
+        local a, b = pts[i], pts[i % n + 1];
+        room();
+        vert(cx, cy, 0.0, 1.0, color);
+        vert(bx + a[1] * s, by + a[2] * s, 0.0, 1.0, color);
+        vert(bx + b[1] * s, by + b[2] * s, 0.0, 1.0, color);
+    end
+end
+
+local function cursor_band(outer, inner, bx, by, s, color) -- between two outlines (same point count)
+    local n = #outer;
+    for i = 1, n do
+        local a, b, p, q = outer[i], outer[i % n + 1], inner[i], inner[i % n + 1];
+        local ax, ay, qbx, qby = bx + a[1] * s, by + a[2] * s, bx + b[1] * s, by + b[2] * s;
+        local px, py, qx, qy = bx + p[1] * s, by + p[2] * s, bx + q[1] * s, by + q[2] * s;
+        room();
+        vert(ax, ay, 0.0, 1.0, color);
+        vert(qbx, qby, 0.0, 1.0, color);
+        vert(qx, qy, 0.0, 1.0, color);
+        vert(ax, ay, 0.0, 1.0, color);
+        vert(qx, qy, 0.0, 1.0, color);
+        vert(px, py, 0.0, 1.0, color);
+    end
+end
+
+local function cursor_fringe(pts, bx, by, s, color, dir) -- fades to clear over CUR_FRINGE px, out (1) or in (-1)
     local clear = bit.band(color, 0x00FFFFFF);
-    local cx, cy = bx + cur.ox * s, by + cur.oy * s;
+    local f = CUR_FRINGE * dir;
     local n = #pts;
     for i = 1, n do
         local a, b = pts[i], pts[i % n + 1];
         local ax, ay, qx, qy = bx + a[1] * s, by + a[2] * s, bx + b[1] * s, by + b[2] * s;
         room();
-        vert(cx, cy, 0.0, 1.0, color);
         vert(ax, ay, 0.0, 1.0, color);
         vert(qx, qy, 0.0, 1.0, color);
-        room();
+        vert(qx + b[3] * f, qy + b[4] * f, 0.0, 1.0, clear);
         vert(ax, ay, 0.0, 1.0, color);
-        vert(qx, qy, 0.0, 1.0, color);
-        vert(qx + b[3] * CUR_FRINGE, qy + b[4] * CUR_FRINGE, 0.0, 1.0, clear);
-        vert(ax, ay, 0.0, 1.0, color);
-        vert(qx + b[3] * CUR_FRINGE, qy + b[4] * CUR_FRINGE, 0.0, 1.0, clear);
-        vert(ax + a[3] * CUR_FRINGE, ay + a[4] * CUR_FRINGE, 0.0, 1.0, clear);
+        vert(qx + b[3] * f, qy + b[4] * f, 0.0, 1.0, clear);
+        vert(ax + a[3] * f, ay + a[4] * f, 0.0, 1.0, clear);
     end
 end
 
-local function draw_cursor(index, key, raise)
-    if (index == nil or index == 0) then return; end
-    local x, h, z, gap = cursor_anchor(tr.ent, index);
-    if (x == nil) then return; end
-    local sx, sy = project(x, h, z);
-    if (sx == nil) then return; end
-    if (cur == nil) then cur = cursor_shapes(); end
-    local s = cfg.cursor_size or 1.0;
-    local bx, by = sx - CUR_W / 2 * s, sy - (CUR_H + gap + raise) * s; -- centred over the head point, bottom on it
-    local c = (key ~= 'white') and theme.P[key] or nil;
-    if (c == nil) then c = CUR_WHITE; end
-
-    cursor_shape(cur.border, bx, by, s, cursor_tint(c, 0.25, 0xFF));
-    cursor_shape(cur.ring, bx, by, s, cursor_tint(c, -0.85, 0xFF));
-
-    -- The core: three facets meeting at the incentre, each edge fading into the ring.
+-- Gem / flat: light border, dark ring, a core of three facets meeting at the incentre (each edge fading into the ring).
+local function draw_gem(bx, by, s, c, facets)
     local cx, cy = bx + cur.ox * s, by + cur.oy * s;
+    local border, ring = cursor_tint(c, 0.25, 0xFF), cursor_tint(c, -0.85, 0xFF);
+    cursor_fan(cur.border, cx, cy, bx, by, s, border);
+    cursor_fringe(cur.border, bx, by, s, border, 1);
+    cursor_fan(cur.ring, cx, cy, bx, by, s, ring);
+    cursor_fringe(cur.ring, bx, by, s, ring, 1);
     local C, N = cur.corners, cur.normals;
-    for _, f in ipairs(CUR_FACETS) do
+    for _, f in ipairs(facets) do
         local a, b = C[f[1]], C[f[2]];
         local ax, ay, qx, qy = bx + a[1] * s, by + a[2] * s, bx + b[1] * s, by + b[2] * s;
         local co, ca, cb = cursor_tint(c, f[3], 0xFF), cursor_tint(c, f[4], 0xFF), cursor_tint(c, f[5], 0xFF);
@@ -2218,6 +2268,83 @@ local function draw_cursor(index, key, raise)
         vert(ax, ay, 0.0, 1.0, ca);
         vert(qx + nx, qy + ny, 0.0, 1.0, bit.band(cb, 0x00FFFFFF));
         vert(ax + nx, ay + ny, 0.0, 1.0, bit.band(ca, 0x00FFFFFF));
+    end
+end
+
+-- Hollow: dark edge, colour band, dark edge, nothing inside.
+local function draw_hollow(bx, by, s, c)
+    local L = cur.hol;
+    local dark, band = cursor_tint(c, -0.85, 0xFF), cursor_tint(c, 0.10, 0xFF);
+    cursor_band(L[1], L[2], bx, by, s, dark);
+    cursor_fringe(L[1], bx, by, s, dark, 1);
+    cursor_band(L[2], L[3], bx, by, s, band);
+    cursor_band(L[3], L[4], bx, by, s, dark);
+    cursor_fringe(L[4], bx, by, s, dark, -1);
+end
+
+-- Crystal: the faces turned toward you, each lit by how it faces the light, over a dark outline of its silhouette.
+local function draw_crystal(bx, by, s, c, ang)
+    local ax, ey = CRY_A + CRY_EDGE, CRY_UP + CRY_EDGE; -- the upright axis and the equator, in box px
+    local E, lo, hi = { }, 0, 0;
+    for k = 1, 4 do
+        local p = ang + (k - 1) * math.pi / 2;
+        E[k] = { CRY_A * math.sin(p), 0, CRY_A * math.cos(p) }; -- across, down, toward you
+        lo, hi = math.min(lo, E[k][1]), math.max(hi, E[k][1]);
+    end
+    local sil = { { ax, ey - CRY_UP }, { ax + hi, ey }, { ax, ey + CRY_DOWN }, { ax + lo, ey } };
+    local pts, _, _, ox, oy = cursor_outline(sil, CRY_EDGE, 0);
+    local dark = cursor_tint(c, -0.85, 0xFF);
+    cursor_fan(pts, bx + ox * s, by + oy * s, bx, by, s, dark);
+    cursor_fringe(pts, bx, by, s, dark, 1);
+    local L = CRY_LIGHT;
+    for _, apex in ipairs({ { 0, -CRY_UP, 0 }, { 0, CRY_DOWN, 0 } }) do
+        for k = 1, 4 do
+            local p, q = E[k], E[k % 4 + 1];
+            local ux, uy, uz = p[1] - apex[1], p[2] - apex[2], p[3] - apex[3];
+            local vx, vy, vz = q[1] - apex[1], q[2] - apex[2], q[3] - apex[3];
+            local nx, ny, nz = uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx;
+            local mx, my, mz = apex[1] + p[1] + q[1], apex[2] + p[2] + q[2], apex[3] + p[3] + q[3]; -- 3x its centre
+            if (nx * mx + ny * my + nz * mz < 0) then nx, ny, nz = -nx, -ny, -nz; end
+            if (nz > 0) then -- facing you
+                local len = math.sqrt(nx * nx + ny * ny + nz * nz);
+                local lit = (nx * L[1] + ny * L[2] + nz * L[3]) / len;
+                local col = cursor_tint(c, math.max(-0.6, math.min(0.6, 0.7 * lit - 0.1)), 0xFF);
+                room();
+                vert(bx + (ax + apex[1]) * s, by + (ey + apex[2]) * s, 0.0, 1.0, col);
+                vert(bx + (ax + p[1]) * s, by + ey * s, 0.0, 1.0, col);
+                vert(bx + (ax + q[1]) * s, by + ey * s, 0.0, 1.0, col);
+            end
+        end
+    end
+end
+
+local function draw_cursor(index, key, raise)
+    if (index == nil or index == 0) then return; end
+    local x, h, z, gap = cursor_anchor(tr.ent, index);
+    if (x == nil) then return; end
+    local sx, sy = project(x, h, z);
+    if (sx == nil) then return; end
+    if (cur == nil) then cur = cursor_shapes(); end
+    local c = nil;
+    if (key == 'kind') then
+        c = CUR_KIND[faction_color(tr.ent, index)];
+    elseif (key ~= 'white') then
+        c = theme.P[key];
+    end
+    if (c == nil) then c = CUR_WHITE; end
+    local s = cfg.cursor_size or 1.0;
+    local style = cfg.cursor_style;
+    local w, hh = CUR_W, CUR_H;
+    if (style == 'crystal') then w, hh = CRY_W, CRY_H; end
+    local lift = gap + raise;
+    if (cfg.cursor_float) then lift = lift + CUR_FLOAT * 0.5 * (1 - math.cos(os.clock() * TWO_PI / CUR_FLOAT_SECS)); end
+    local bx, by = sx - w / 2 * s, sy - (hh + lift) * s; -- centred over the head point, bottom on it
+    if (style == 'crystal') then
+        draw_crystal(bx, by, s, c, cfg.cursor_spin and (os.clock() * TWO_PI / CRY_TURN) or CRY_ANGLE);
+    elseif (style == 'hollow') then
+        draw_hollow(bx, by, s, c);
+    else
+        draw_gem(bx, by, s, c, CUR_FACETS[style] or CUR_FACETS.gem);
     end
 end
 
@@ -2339,6 +2466,85 @@ local function status_line()
 end
 
 -- args[1] is ignored (was /tring); args[2..] are the old sub-commands.
+local function cursor_status()
+    return ('goomui cursor: %s | %s | colour %s | sub %s | size %.2f | float %s | spin %s'):fmt(
+        cfg.cursor ~= false and 'on' or 'off', tostring(cfg.cursor_style), tostring(cfg.cursor_color),
+        tostring(cfg.cursor_sub), cfg.cursor_size or 1.0, cfg.cursor_float and 'on' or 'off',
+        cfg.cursor_spin and 'on' or 'off');
+end
+
+local function one_of(list, v)
+    for _, k in ipairs(list) do if (k == v) then return true; end end
+    return false;
+end
+
+-- /goomui cursor [on|off | style <s> | color|sub <c> | size <n> | float|spin [on|off] | preset <name>
+--   | set <on|off> <style> <colour> <sub> <size> <float on|off> <spin on|off>]   (set: all at once, for Apply to all)
+function M.cursor_command(args)
+    local opt = (#args >= 3) and args[3]:lower() or nil;
+    local val = (#args >= 4) and args[4]:lower() or nil;
+    local function flag(now)
+        if (val == 'on' or val == 'off') then return val == 'on'; end
+        return not now;
+    end
+    if (opt == nil) then
+        cfg.cursor = not (cfg.cursor ~= false);
+    elseif (opt == 'on' or opt == 'off') then
+        cfg.cursor = (opt == 'on');
+    elseif (opt == 'style') then
+        if (not one_of(M.CURSOR_STYLES, val)) then
+            print('goomui cursor styles: ' .. table.concat(M.CURSOR_STYLES, ' '));
+            return;
+        end
+        cfg.cursor_style = val;
+    elseif (opt == 'color' or opt == 'colour' or opt == 'sub') then
+        if (not one_of(M.CURSOR_COLORS, val)) then
+            print('goomui cursor colours: ' .. table.concat(M.CURSOR_COLORS, ' '));
+            return;
+        end
+        cfg[(opt == 'sub') and 'cursor_sub' or 'cursor_color'] = val;
+    elseif (opt == 'size' and tonumber(args[4]) ~= nil) then
+        cfg.cursor_size = math.max(0.5, math.min(3.0, tonumber(args[4])));
+    elseif (opt == 'float') then
+        cfg.cursor_float = flag(cfg.cursor_float);
+    elseif (opt == 'spin') then
+        cfg.cursor_spin = flag(cfg.cursor_spin);
+    elseif (opt == 'preset') then
+        local hit, names = nil, { };
+        for _, p in ipairs(M.CURSOR_PRESETS) do
+            if (p[1]:lower() == val) then hit = p; end
+            names[#names + 1] = p[1]:lower();
+        end
+        if (hit == nil) then print('goomui cursor presets: ' .. table.concat(names, ' ')); return; end
+        cfg.cursor_style, cfg.cursor_color, cfg.cursor_sub = hit[2], hit[3], hit[4];
+    elseif (opt == 'set' and #args >= 10) then
+        local v = { };
+        for i = 4, 10 do v[i] = args[i]:lower(); end
+        if (not one_of(M.CURSOR_STYLES, v[5]) or not one_of(M.CURSOR_COLORS, v[6]) or not one_of(M.CURSOR_COLORS, v[7])
+            or tonumber(v[8]) == nil) then
+            print('goomui cursor set <on|off> <style> <colour> <sub> <size> <float on|off> <spin on|off>');
+            return;
+        end
+        cfg.cursor, cfg.cursor_style, cfg.cursor_color, cfg.cursor_sub = (v[4] == 'on'), v[5], v[6], v[7];
+        cfg.cursor_size = math.max(0.5, math.min(3.0, tonumber(v[8])));
+        cfg.cursor_float, cfg.cursor_spin = (v[9] == 'on'), (v[10] == 'on');
+    else
+        print('/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | preset <name>');
+        return;
+    end
+    settings.save('ring');
+    print(cursor_status());
+end
+
+-- Apply to all: these settings on every character (MultiSend /mss, this one included). Returns the command sent.
+function M.cursor_apply_all()
+    local cmd = ('/mss /goomui cursor set %s %s %s %s %.2f %s %s'):fmt(cfg.cursor ~= false and 'on' or 'off',
+        cfg.cursor_style, cfg.cursor_color, cfg.cursor_sub, cfg.cursor_size or 1.0, cfg.cursor_float and 'on' or 'off',
+        cfg.cursor_spin and 'on' or 'off');
+    AshitaCore:GetChatManager():QueueCommand(-1, cmd);
+    return cmd;
+end
+
 function M.command(args)
     local sub = (#args >= 2) and args[2]:lower() or 'status';
 
@@ -2405,27 +2611,6 @@ function M.command(args)
         settings.save('ring');
 
         print('goomui ' .. M.geo_status());
-        return;
-    end
-
-    if (sub == 'cursor') then -- /goomui ring cursor [on|off|color <c>|sub <c>|size <n>]
-        local opt = (#args >= 3) and args[3]:lower() or nil;
-        local val = (#args >= 4) and args[4]:lower() or nil;
-        if (opt == 'on' or opt == 'off') then
-            cfg.cursor = (opt == 'on');
-        elseif ((opt == 'color' or opt == 'colour' or opt == 'sub') and val ~= nil) then
-            local known = false;
-            for _, k in ipairs(M.CURSOR_COLORS) do if (k == val) then known = true; end end
-            if (not known) then print('goomui cursor colours: ' .. table.concat(M.CURSOR_COLORS, ' ')); return; end
-            cfg[(opt == 'sub') and 'cursor_sub' or 'cursor_color'] = val;
-        elseif (opt == 'size' and tonumber(args[4]) ~= nil) then
-            cfg.cursor_size = math.max(0.5, math.min(3.0, tonumber(args[4])));
-        elseif (opt == nil) then
-            cfg.cursor = not (cfg.cursor ~= false);
-        end
-        settings.save('ring');
-        print(('goomui cursor: %s | colour %s | sub %s | size %.2f'):fmt(cfg.cursor ~= false and 'on' or 'off',
-            tostring(cfg.cursor_color), tostring(cfg.cursor_sub), cfg.cursor_size or 1.0));
         return;
     end
 

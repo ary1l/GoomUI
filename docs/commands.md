@@ -16,6 +16,7 @@
 | `/goomui look frame [on\|off]` | bar frame (no word flips it) |
 | `/goomui look panel tinted\|dark\|clear\|framed` | panel backgrounds |
 | `/goomui look opacity <0.25-2>` | panel opacity |
+| `/goomui look set <preset> <shape> <texture> <frame on\|off> <panel> <opacity>` | all at once (what *Apply to all* sends) |
 
 ## Party list
 
@@ -45,10 +46,20 @@
 | `/goomui ring scale <n>` \| `slices <n>` | size / smoothness |
 | `/goomui ring range on\|off\|geo\|hitbox` | range fill toggles |
 | `/goomui ring range base <n>` \| `fill <n>` | range in yalms / fill strength |
-| `/goomui ring cursor [on\|off]` | target cursor (no word: toggle) |
-| `/goomui ring cursor color\|sub <colour>` \| `size <n>` | cursor / sub-target colour (`white`, `mp`, `tp`, ...; a wrong name lists them) / size 0.5-3 |
 | `/goomui geo [on\|off\|buffs\|cure\|bubble\|clear]` | GEO bubble rings |
 | `/goomui geo radius\|cap\|scan\|slices <n>` | bubble radius, max rings, scan radius, slices |
+
+## Target cursor
+
+| Command | Does |
+|---|---|
+| `/goomui cursor [on\|off]` | target cursor (no word: toggle) |
+| `/goomui cursor style gem\|flat\|hollow\|crystal` | style |
+| `/goomui cursor color\|sub <colour>` | cursor / sub-target colour (`white`, `kind`, `mp`, `tp`, ...; a wrong name lists them) |
+| `/goomui cursor size <n>` | 0.5-3 |
+| `/goomui cursor float\|spin [on\|off]` | drift up and down / turn the crystal (no word: toggle) |
+| `/goomui cursor preset <name>` | goomui, classic, crystal, minimal |
+| `/goomui cursor set <on\|off> <style> <colour> <sub> <size> <float> <spin>` | all at once (what *Apply to all* sends) |
 
 ## AAEV
 

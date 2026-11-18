@@ -15,13 +15,19 @@ Rings on the ground under your target and sub-target: facing arrow, runes, rear 
 
 ## Target cursor
 
-A marker over your target's head, drawn over everything (Ring tab or `/goomui ring cursor ...`). It does what the
+A marker over your target's head, drawn over everything (Cursor tab or `/goomui cursor ...`). It does what the
 customtarget addon does: unload that one.
 
-- **Colours:** a palette colour (HP, MP, TP, Spell, Crit, WS, ...) or White for the border and lit centre, so it
-  follows the colour preset. Default MP.
+- **Styles:** *Gem* (light border, dark ring, lit facets; default), *Flat* (smooth centre), *Hollow* (outline only)
+  and *Crystal* (an eight-faced crystal that turns; *Spin* off holds it still).
+- **Colours:** a palette colour (HP, MP, TP, Spell, Crit, WS, ...), so it follows the colour preset; White; or
+  *Target kind*, the ring colours (mobs, players, NPCs). Default MP.
 - **Sub-target colour:** while you sub-target, your first target keeps a cursor in this colour, 10 px higher; item,
   `<stnpc>` and `<stpc>` picks use it too. Default TP ready.
+- **Float:** drifts up and down 2.5 px.
+- **Presets:** goomui (gem, MP / TP ready), Classic (gem, white / blue), Crystal, Minimal (hollow, white / blue).
+- **Apply to all characters:** sends the cursor settings to every character with `/mss` (MultiSend). The Look tab
+  has the same button for the colour preset, bar look and panels.
 - **Placement:** the head point the game puts the name at (skeleton bone 2, read as customtarget reads it); doors and
   other objects: 8 px above their position. Same hiding rules as the rings.
 
