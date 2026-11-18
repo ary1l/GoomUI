@@ -283,6 +283,7 @@ local HELP = {
     '/goomui ring on|off|depth|arrow|runes|fade|flip',
     '/goomui ring scale <n> | slices <n>',
     '/goomui ring range on|off|geo|hitbox | base <n> | fill <n>',
+    '/goomui ring cursor [on|off] | color|sub <colour> | size <n>',
     '/goomui geo [on|off|buffs|cure|bubble|clear | radius|cap|scan|slices <n>]',
     '/goomui aaev on|off             enable / disable auto-attack chart',
     '/goomui aaev [show|hide|demo|lock|unlock|zone|help ...]',

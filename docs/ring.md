@@ -13,6 +13,17 @@ Rings on the ground under your target and sub-target: facing arrow, runes, rear 
   no depth surface: turn it off.
 - Hidden when the game interface is hidden, in cutscenes, and while the map or expanded log menus are open.
 
+## Target cursor
+
+A marker over your target's head, drawn over everything (Ring tab or `/goomui ring cursor ...`). It does what the
+customtarget addon does: unload that one.
+
+- **Colours:** White or a palette colour (HP, MP, TP, Spell, Crit, WS, ...), so it follows the colour preset.
+- **Sub-target colour:** while you sub-target, your first target keeps a cursor in this colour, 10 px higher; item,
+  `<stnpc>` and `<stpc>` picks use it too.
+- **Placement:** the head point the game puts the name at (skeleton bone 2, read as customtarget reads it); doors and
+  other objects: 8 px above their position. Same hiding rules as the rings.
+
 ## GEO bubbles
 
 Only geomancers in your party or alliance (you included) count. Geo-, Indi- and Entrust casts by anyone else are

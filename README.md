@@ -12,7 +12,7 @@ look and saved per character.
 | **Party** | party + alliance list, buff icons in game order, debuffs framed, distance, range dimming, crew recasts on hover |
 | **Target bar** | target, sub-target and pet HP; the mob's debuffs with timers (hover: name, time left); cast, item, job ability and menu-recast panels; tint and stripe by target kind |
 | **Treasure pool** | a one-line summary by the party list (click for the window): items, time left, each member's lot (high to low, leader gold), passes, who still has to act |
-| **Rings** | ground rings under target / sub-target with facing arrow and range fill; GEO bubble rings for your group |
+| **Rings** | ground rings under target / sub-target with facing arrow and range fill; a target cursor over the head in your palette colours; GEO bubble rings for your group |
 | **AAEV** | auto-attack chart as one line under the chat log (or under the target bar): per-round bars, last round, accuracy, crit, multi-attack (DA/TA/QA) |
 | **Look** | one bar style for everything; 30 colour presets; bar shape, texture and frame combine freely; panel styles (Look tab) |
 
@@ -46,7 +46,8 @@ In game (player names pixelated). Click one for full size; each section's page h
 
 ## Install
 
-1. `/addon unload goomui` and `/addon unload targethud` (older versions).
+1. `/addon unload goomui` and `/addon unload targethud` (older versions); `/addon unload customtarget` if you use it
+   (goomui draws the target cursor).
 2. This repository into `Ashita/addons/goomui/` (folder name must be `goomui`; keep `libs/gdifonts`).
 3. `/addon load goomui`
 
@@ -73,6 +74,7 @@ are used as they are
 | `/goomui aaev demo` | chart with sample data |
 | `/goomui look next\|prev\|<preset>` | try colour presets in game |
 | `/goomui ring on\|off` | target rings |
+| `/goomui ring cursor on\|off` | target cursor |
 | `/goomui geo on\|off` | GEO bubble rings |
 
 [All commands](docs/commands.md).
@@ -84,7 +86,7 @@ are used as they are
 | [Party list](docs/party.md) | rows, colours, buffs, low-fi, crew recast hover (with pictures) |
 | [Target bar](docs/bar.md) | panels, target kinds, cast / item bar rules |
 | [AAEV](docs/aaev.md) | the chart, round colours, stat grid, multi-attack |
-| [Rings and GEO](docs/ring.md) | target rings, range fill, GEO bubbles |
+| [Rings and GEO](docs/ring.md) | target rings, range fill, target cursor, GEO bubbles |
 | [Commands](docs/commands.md) | every command |
 | [Settings](docs/settings.md) | files, imports, colour presets, bar look, panels |
 
@@ -95,7 +97,7 @@ goomui.lua            entry: events, commands, settings, imports
 modules/theme.lua     palette + bar drawing shared by everything
 modules/party.lua     party / alliance list (D3D sprite + gdifonts)
 modules/bar.lua       target / cast / JA / menu bars
-modules/ring.lua      ground rings + GEO bubbles
+modules/ring.lua      ground rings, target cursor, GEO bubbles
 modules/aaev.lua      auto-attack chart       (modules/aaev_data.lua: message / skill tables)
 modules/gui.lua       settings window
 modules/debuffs.lua   debuff ids for the party list
@@ -119,7 +121,8 @@ docs/                 these pages
 ## Credits
 
 - Party: Tylas (XivParty), Tirem (Ashita port; hide-UI signatures with Velyn), goomUI. MIT: `LICENSE-XivParty`.
-- Target bar: aryl (targetbar). Rings: Broguypal (targetring, Windower). AAEV: darkewaffle (Windower).
+- Target bar: aryl (targetbar). Rings: Broguypal (targetring, Windower). Target cursor placement:
+  Jyouya (customtarget). AAEV: darkewaffle (Windower).
 - atom0s: XiPackets, Ashita SDK, recast / equipmon / crosshair patterns. Thorny: gdifonts, LuAshitacast lookups.
 - `modules/debuffs.lua` from XIUI `bufftable.lua`; `modules/mobdebuff.lua` and `mobdebuff_data.lua` from XIUI
   `debuffhandler.lua` / `debuff_retail.lua` (itself from mousseng's XITools). XIUI is GPL-3.0.

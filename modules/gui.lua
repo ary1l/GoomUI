@@ -7,6 +7,7 @@
 require('common');
 local imgui    = require('imgui');
 local settings = require('settings');
+local theme    = require('modules/theme');
 
 local G = { open = { false } };
 
@@ -111,6 +112,33 @@ local function tab_bar(c, bar)
     end
 end
 
+-- Target cursor colour: White or a palette colour, each shown with its swatch in the current preset.
+local CURSOR_NAMES = { white = 'White', hp_full = 'HP', hp_50 = 'HP half', hp_0 = 'HP low', mp = 'MP', tp = 'TP',
+    tp_rdy = 'TP ready', tp_max = 'TP 3000', spell = 'Spell', item = 'Item', hit = 'Hit', crit = 'Crit', ws = 'WS',
+    heal = 'Heal', counter = 'Counter', r3 = 'Roll' };
+local SWATCH = { 12, 12 };
+local function cursor_f4(key)
+    local p = (key ~= 'white') and theme.P[key] or nil;
+    if (p == nil) then return theme.f4(245, 245, 245); end
+    return theme.f4(p[1], p[2], p[3]);
+end
+local function cursor_colour(c, ring, label, key)
+    local cur = c[key];
+    imgui.ColorButton('##cur_' .. key, cursor_f4(cur), ImGuiColorEditFlags_NoTooltip, SWATCH);
+    imgui.SameLine();
+    if (imgui.BeginCombo(label, CURSOR_NAMES[cur] or tostring(cur))) then
+        for _, k in ipairs(ring.CURSOR_COLORS) do
+            imgui.ColorButton('##sw_' .. key .. k, cursor_f4(k), ImGuiColorEditFlags_NoTooltip, SWATCH);
+            imgui.SameLine();
+            if (imgui.Selectable((CURSOR_NAMES[k] or k) .. '##' .. key .. k, k == cur)) then
+                c[key] = k;
+                settings.save('ring');
+            end
+        end
+        imgui.EndCombo();
+    end
+end
+
 local function tab_ring(c, ring)
     local hook = ring.on_change;
 
@@ -130,6 +158,13 @@ local function tab_ring(c, ring)
     check(c, 'ring', 'Fill GEO rings too', 'range_geo', hook);
     slider(c, 'ring', 'Base range##thud_rbase', 'range_base', 1.0, 50.0, '%.1f', false, hook);
     slider(c, 'ring', 'Fill strength##thud_rfill', 'range_fill', 0.02, 0.60, '%.2f', false, hook);
+
+    imgui.Separator();
+    imgui.TextColored(HEADER, 'Target cursor');
+    check(c, 'ring', 'Cursor over your target', 'cursor', hook);
+    cursor_colour(c, ring, 'Colour##thud_ccol', 'cursor_color');
+    cursor_colour(c, ring, 'Sub-target colour##thud_csub', 'cursor_sub');
+    slider(c, 'ring', 'Size##thud_csize', 'cursor_size', 0.5, 3.0, '%.2f', false, hook);
 
     imgui.Separator();
     if (imgui.Button('Reset ring defaults##thud_ring_reset')) then
@@ -181,8 +216,6 @@ local function tab_geo(c, ring)
     imgui.Separator();
     imgui.TextColored(DIM, (ring.geo_status():gsub(' | ', '\n')));
 end
-
-local theme = require('modules/theme');
 
 -- Colour presets: one button each, with a strip of its bar colours.
 local function swatch(c, w)

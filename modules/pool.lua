@@ -134,7 +134,7 @@ end
 ------------------------------------------------------------
 -- memory read (once per frame)
 ------------------------------------------------------------
-local rows = {};  -- reused: { slot, h, count, my, lead, leadLot }
+local rows = {};  -- reused: { slot, h, my, lead, leadLot }
 
 local function read_pool()
     local inv = AshitaCore:GetMemoryManager():GetInventory();
@@ -161,7 +161,7 @@ local function read_pool()
             n = n + 1;
             local r = rows[n] or {};
             rows[n] = r;
-            r.slot, r.h, r.count, r.my = slot, h, it.Count or 1, it.Lot or 0;
+            r.slot, r.h, r.my = slot, h, it.Lot or 0; -- one item per slot: three crystals are three slots (XiPackets 0x0D2 TrophyItemNum)
             r.lead = (it.WinningEntityName ~= nil) and tostring(it.WinningEntityName):match('^[^%z]*') or '';
             r.leadLot = it.WinningLot or 0;
         else
@@ -178,20 +178,23 @@ end
 ------------------------------------------------------------
 local function demo_rows()
     local t = now();
-    local function H(id, seen, lots, pass)
-        local h = new_hist('demo' .. id, id, seen);
+    local function H(id, seen, lots, pass, n)
+        local h = new_hist('demo' .. id .. ':' .. (n or 1), id, seen);
         for i, l in ipairs(lots) do h.lots[i] = { name = l[1], lot = l[2] }; end
         for i, p in ipairs(pass) do h.pass[100 + i] = p; end
         return h;
     end
     -- Member1 = you (same placeholder names as the party list setup)
-    rows[1] = { slot = 0, count = 1, my = 0, lead = 'Member3', leadLot = 912,
+    rows[1] = { slot = 0, my = 0, lead = 'Member3', leadLot = 912,
         h = H(16555, t - 40, { { 'Member3', 912 }, { 'Member4', 455 } }, { 'Member6' }) };
-    rows[2] = { slot = 1, count = 1, my = 65535, lead = '', leadLot = 0,
+    rows[2] = { slot = 1, my = 65535, lead = '', leadLot = 0,
         h = H(13014, t - 250, {}, { 'Member2', 'Member5' }) };
-    rows[3] = { slot = 2, count = 3, my = 0, lead = '', leadLot = 0, h = H(844, nil, {}, {}) };
-    for i = 4, #rows do rows[i] = nil; end
-    return 3;
+    -- three of the same drop: three slots, one item each (the pool never stacks them)
+    for i = 0, 2 do
+        rows[3 + i] = { slot = 2 + i, my = 0, lead = '', leadLot = 0, h = H(844, t - 15, {}, {}, i + 1) };
+    end
+    for i = 6, #rows do rows[i] = nil; end
+    return 5;
 end
 
 ------------------------------------------------------------
@@ -224,7 +227,6 @@ end
 local function draw_row(r, party, myName, myZone)
     local h = r.h;
     local name = item_name(h.item);
-    if (r.count > 1) then name = ('%s x%d'):fmt(name, r.count); end
     -- [Lot] while you have not acted, [Pass] until you passed; then the name; time left at the right edge
     local sid = tostring(r.slot);
     if (r.my == 0) then
