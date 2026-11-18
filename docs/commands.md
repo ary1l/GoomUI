@@ -45,6 +45,8 @@
 | `/goomui ring scale <n>` \| `slices <n>` | size / smoothness |
 | `/goomui ring range on\|off\|geo\|hitbox` | range fill toggles |
 | `/goomui ring range base <n>` \| `fill <n>` | range in yalms / fill strength |
+| `/goomui ring cursor [on\|off]` | target cursor (no word: toggle) |
+| `/goomui ring cursor color\|sub <colour>` \| `size <n>` | cursor / sub-target colour (`white`, `mp`, `tp`, ...; a wrong name lists them) / size 0.5-3 |
 | `/goomui geo [on\|off\|buffs\|cure\|bubble\|clear]` | GEO bubble rings |
 | `/goomui geo radius\|cap\|scan\|slices <n>` | bubble radius, max rings, scan radius, slices |
 

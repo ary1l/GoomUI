@@ -8,6 +8,7 @@ require('common');
 local d3d       = require('d3d8');
 local ffi       = require('ffi');
 local settings  = require('settings');
+local theme     = require('modules/theme');  -- the target cursor's palette colours
 local C         = ffi.C;
 local unpack_bits = ashita.bits.unpack_be;
 local dev       = d3d.get_device();
@@ -171,6 +172,11 @@ local default_settings = T{
     geo_buffs   = true,     -- ring party members inside a buff (Geo-Regen etc) bubble
     geo_bubble  = true,     -- draw the bubble boundary itself
     geo_indi_jp = -1,       -- Indicolure duration JP rank from 0x08D; -1 = not seen yet
+    -- Target cursor over the target's head (see Target cursor below)
+    cursor       = true,
+    cursor_color = 'white',  -- 'white' or a goomui palette colour (M.CURSOR_COLORS), following the colour preset
+    cursor_sub   = 'mp',     -- the first target while you sub-target, and item / <stnpc> / <stpc> picks
+    cursor_size  = 1.0,
     migrated    = false,    -- old targetring settings imported
 };
 M.defaults = default_settings;
@@ -2040,11 +2046,129 @@ local function ui_blocks_rings()
     return blocked;
 end
 
+----------------------------------------------------------------------------------------------------
+-- Target cursor: a rounded, down-pointing marker over the target's head, in a goomui palette colour (or white) that
+-- follows the colour preset. While you sub-target, the first target keeps one in the sub colour, raised 10 px; item /
+-- <stnpc> / <stpc> picks (sub-target flags 512, 18, 525) take the sub colour too. Drawn in this pass after the rings,
+-- without the depth test, from shapes built once. Placement as in the customtarget addon (Jyouya): the head is skeleton
+-- bone 2 (where the game puts the name); doors and other objects (type 3) use their own position, 8 px higher.
+-- Rebuilt here: no customtarget code or images.
+----------------------------------------------------------------------------------------------------
+M.CURSOR_COLORS = { 'white', 'hp_full', 'hp_50', 'hp_0', 'mp', 'tp', 'tp_rdy', 'tp_max', 'spell', 'item', 'hit',
+    'crit', 'ws', 'heal', 'counter', 'r3' };
+local CUR_W, CUR_H = 30, 20;                      -- px at size 1 (customtarget's cursor)
+local CUR_R, CUR_EDGE, CUR_RIM = 3.0, 1.6, 1.4;   -- corner radius, dark outline and light rim (px at size 1)
+local CUR_SEGS  = 4;                              -- arc steps per corner
+local CUR_RAISE = 10;                             -- px: the first target's cursor while sub-targeting
+local CUR_WHITE = { 245, 245, 245 };
+local cur_layers, cur_ix, cur_iy = nil, 0, 0;     -- outline / rim / core points around the incentre, at size 1
+
+-- The box triangle (top corners, bottom point) shrunk about its incentre by the corner radius, then grown back per
+-- layer with round corners: outline, rim, core. Points are offsets from the incentre.
+local function cursor_layers()
+    local W, H = CUR_W, CUR_H;
+    local side = math.sqrt((W / 2) ^ 2 + H ^ 2);
+    local per = W + 2 * side;
+    local ix, iy, r = (side * W + W * W / 2) / per, W * H / per, W * H / per;
+    local k = (r - CUR_R) / r;
+    local V = { { -ix * k, -iy * k }, { (W - ix) * k, -iy * k }, { (W / 2 - ix) * k, (H - iy) * k } };
+    local function normal(px, py, qx, qy) -- an edge's outward normal angle (its midpoint lies away from the incentre)
+        local nx, ny = qy - py, -(qx - px);
+        if (nx * (px + qx) + ny * (py + qy) < 0) then nx, ny = -nx, -ny; end
+        return math.atan2(ny, nx);
+    end
+    local layers = { };
+    for li, grow in ipairs({ CUR_R, CUR_R - CUR_EDGE, CUR_R - CUR_EDGE - CUR_RIM }) do
+        local pts = { };
+        for i = 1, 3 do
+            local a, b, c = V[(i + 1) % 3 + 1], V[i], V[i % 3 + 1]; -- previous, this, next corner
+            local a1, a2 = normal(a[1], a[2], b[1], b[2]), normal(b[1], b[2], c[1], c[2]);
+            local d = a2 - a1;
+            if (d > math.pi) then d = d - 2 * math.pi; elseif (d < -math.pi) then d = d + 2 * math.pi; end
+            for st = 0, CUR_SEGS do
+                local t = a1 + d * st / CUR_SEGS;
+                pts[#pts + 1] = { b[1] + grow * math.cos(t), b[2] + grow * math.sin(t) };
+            end
+        end
+        layers[li] = pts;
+    end
+    return layers, ix, iy;
+end
+
+local function cursor_argb(key, alpha, lift)
+    local c = (key ~= 'white') and theme.P[key] or nil;
+    if (c == nil) then c = CUR_WHITE; end
+    local r, g, b = c[1], c[2], c[3];
+    if (lift ~= nil) then r, g, b = r + (255 - r) * lift, g + (255 - g) * lift, b + (255 - b) * lift; end
+    return theme.argb(math.floor(r), math.floor(g), math.floor(b), alpha);
+end
+
+-- The head point (x, height, z) and extra px above it, or nil. Doors and other objects (type 3): their own position;
+-- an unrendered player (render flags 0): where last seen; anything else unrendered: none (no skeleton read).
+local function cursor_anchor(ent, index)
+    if (index >= MAX_INDEX) then return nil; end
+    local etype = ent:GetType(index);
+    local x, h, z;
+    if (etype == 3) then
+        x, h, z = ent:GetLocalPositionX(index), ent:GetLocalPositionZ(index), ent:GetLocalPositionY(index);
+    elseif (not is_rendered(ent, index)) then
+        if (etype ~= 0 or ent:GetRenderFlags0(index) ~= 0) then return nil; end
+        x, h, z = ent:GetLastPositionX(index), ent:GetLastPositionZ(index), ent:GetLastPositionY(index);
+    end
+    if (x ~= nil) then
+        if (x ~= x or h ~= h or z ~= z) then return nil; end
+        return x, h, z, (etype == 3) and 8 or 0;
+    end
+    x, h, z = ring_position(ent, index);
+    if (x == nil) then return nil; end
+    local rd = ashita.memory.read_uint32;
+    local p = rd(ent:GetActorPointer(index) + 0x6B8);
+    if (p == 0) then return nil; end
+    p = rd(p + 0x0C);
+    if (p == 0) then return nil; end
+    p = rd(p);
+    if (p == 0) then return nil; end
+    local bones = ashita.memory.read_uint16(p + 0x32);
+    if (bones == 0 or bones > 1024) then return nil; end
+    local g = p + 0x30 + 0x04 + 0x1E * bones + 0x04 + 2 * 0x1A + 0x0E; -- bone 2: its offset from the model root
+    local f = ashita.memory.read_float;
+    local dx, dh, dz = f(g), f(g + 0x04), f(g + 0x08);
+    if (dx ~= dx or dh ~= dh or dz ~= dz or math.abs(dx) > 20 or math.abs(dz) > 20 or math.abs(dh) > 40) then return nil; end
+    return x + dx, h + dh, z + dz, 0;
+end
+
+local function cursor_fan(pts, cx, cy, s, color)
+    local n = #pts;
+    for i = 1, n do
+        local a, b = pts[i], pts[i % n + 1];
+        room();
+        vert(cx, cy, 0.0, 1.0, color);
+        vert(cx + a[1] * s, cy + a[2] * s, 0.0, 1.0, color);
+        vert(cx + b[1] * s, cy + b[2] * s, 0.0, 1.0, color);
+    end
+end
+
+local function draw_cursor(index, key, raise)
+    if (index == nil or index == 0) then return; end
+    local x, h, z, gap = cursor_anchor(tr.ent, index);
+    if (x == nil) then return; end
+    local sx, sy = project(x, h, z);
+    if (sx == nil) then return; end
+    if (cur_layers == nil) then cur_layers, cur_ix, cur_iy = cursor_layers(); end
+    local s = cfg.cursor_size or 1.0;
+    local cx = sx + (cur_ix - CUR_W / 2) * s;          -- the box centred over the head point, its bottom on it
+    local cy = sy + (cur_iy - CUR_H - gap - raise) * s;
+    cursor_fan(cur_layers[1], cx, cy, s, 0xD8000000);
+    cursor_fan(cur_layers[2], cx, cy, s, cursor_argb(key, 0xF0, 0.45));
+    cursor_fan(cur_layers[3], cx, cy, s, cursor_argb(key, 0xF0, nil));
+end
+
 --------------------------------------------------------------------------------
 -- Events
 ----------------------------------------------------------------------------------------------------
 function M.render()
-    if (not cfg.enabled and not cfg.geo) then return; end
+    local want_cursor = (cfg.cursor ~= false);
+    if (not cfg.enabled and not cfg.geo and not want_cursor) then return; end
 
     local mm = AshitaCore:GetMemoryManager();
     local player = mm:GetPlayer();
@@ -2074,22 +2198,29 @@ function M.render()
 
     local index = 0;
     local index_sub = nil;
+    local first = nil;  -- the first target while sub-targeting (its cursor shows even when it is the one picked)
+    local pick = false; -- an item / <stnpc> / <stpc> pick, not sub-targeting: the cursor takes the sub colour
 
-    if (cfg.enabled) then
+    if (cfg.enabled or want_cursor) then
         local target = mm:GetTarget();
         local is_sub = target:GetIsSubTargetActive();
         if (target:GetIsActive(is_sub) ~= 0) then
             index = target:GetTargetIndex(is_sub);
             if (is_sub == 1) then
-                index_sub = target:GetTargetIndex(0);
-                if (index_sub == index) then index_sub = nil; end
+                first = target:GetTargetIndex(0);
+                if (first == 0) then first = nil; end
+                if (first ~= index) then index_sub = first; end
+            elseif (want_cursor) then
+                local f = target:GetSubTargetFlags();
+                pick = (f == 512 or f == 18 or f == 525);
             end
         end
     end
 
-    local has_target = (index ~= 0 or index_sub ~= nil);
+    local has_target = cfg.enabled and (index ~= 0 or index_sub ~= nil);
+    local has_cursor = want_cursor and (index ~= 0 or first ~= nil);
     local has_geo = (cfg.geo and (geo.count > 0 or geo.bubble_n > 0));
-    if (not has_target and not has_geo) then return; end
+    if (not has_target and not has_geo and not has_cursor) then return; end
     if (not update_matrices()) then return; end
 
     tr.count = 0;
@@ -2124,6 +2255,14 @@ function M.render()
     end
 
     flush();
+
+    if (has_cursor) then -- over everything: normal blend, no depth test
+        dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_INVSRCALPHA);
+        dev:SetRenderState(C.D3DRS_ZENABLE, 0);
+        draw_cursor(index, pick and cfg.cursor_sub or cfg.cursor_color, 0);
+        draw_cursor(first, cfg.cursor_sub, CUR_RAISE);
+        flush();
+    end
     end_state();
 end
 
@@ -2208,6 +2347,27 @@ function M.command(args)
         settings.save('ring');
 
         print('goomui ' .. M.geo_status());
+        return;
+    end
+
+    if (sub == 'cursor') then -- /goomui ring cursor [on|off|color <c>|sub <c>|size <n>]
+        local opt = (#args >= 3) and args[3]:lower() or nil;
+        local val = (#args >= 4) and args[4]:lower() or nil;
+        if (opt == 'on' or opt == 'off') then
+            cfg.cursor = (opt == 'on');
+        elseif ((opt == 'color' or opt == 'colour' or opt == 'sub') and val ~= nil) then
+            local known = false;
+            for _, k in ipairs(M.CURSOR_COLORS) do if (k == val) then known = true; end end
+            if (not known) then print('goomui cursor colours: ' .. table.concat(M.CURSOR_COLORS, ' ')); return; end
+            cfg[(opt == 'sub') and 'cursor_sub' or 'cursor_color'] = val;
+        elseif (opt == 'size' and tonumber(args[4]) ~= nil) then
+            cfg.cursor_size = math.max(0.5, math.min(3.0, tonumber(args[4])));
+        elseif (opt == nil) then
+            cfg.cursor = not (cfg.cursor ~= false);
+        end
+        settings.save('ring');
+        print(('goomui cursor: %s | colour %s | sub %s | size %.2f'):fmt(cfg.cursor ~= false and 'on' or 'off',
+            tostring(cfg.cursor_color), tostring(cfg.cursor_sub), cfg.cursor_size or 1.0));
         return;
     end
 
