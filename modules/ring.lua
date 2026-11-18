@@ -180,6 +180,7 @@ local default_settings = T{
     cursor_style = 'gem',    -- M.CURSOR_STYLES
     cursor_float = false,    -- drifts up and down
     cursor_spin  = true,     -- the crystal turns
+    cursor_lift  = 12,       -- screen px higher over players, clearing the master level stars on their nameplate
     migrated    = false,    -- old targetring settings imported
 };
 M.defaults = default_settings;
@@ -2338,7 +2339,9 @@ local function draw_cursor(index, key, raise)
     if (style == 'crystal') then w, hh = CRY_W, CRY_H; end
     local lift = gap + raise;
     if (cfg.cursor_float) then lift = lift + CUR_FLOAT * 0.5 * (1 - math.cos(os.clock() * TWO_PI / CUR_FLOAT_SECS)); end
-    local bx, by = sx - w / 2 * s, sy - (hh + lift) * s; -- centred over the head point, bottom on it
+    local over = 0; -- players: clear their master level stars
+    if (bit.band(tr.ent:GetSpawnFlags(index), 0x01) ~= 0) then over = cfg.cursor_lift or 0; end
+    local bx, by = sx - w / 2 * s, sy - (hh + lift) * s - over; -- centred over the head point, bottom on it
     if (style == 'crystal') then
         draw_crystal(bx, by, s, c, cfg.cursor_spin and (os.clock() * TWO_PI / CRY_TURN) or CRY_ANGLE);
     elseif (style == 'hollow') then
@@ -2467,10 +2470,10 @@ end
 
 -- args[1] is ignored (was /tring); args[2..] are the old sub-commands.
 local function cursor_status()
-    return ('goomui cursor: %s | %s | colour %s | sub %s | size %.2f | float %s | spin %s'):fmt(
+    return ('goomui cursor: %s | %s | colour %s | sub %s | size %.2f | float %s | spin %s | lift %d'):fmt(
         cfg.cursor ~= false and 'on' or 'off', tostring(cfg.cursor_style), tostring(cfg.cursor_color),
         tostring(cfg.cursor_sub), cfg.cursor_size or 1.0, cfg.cursor_float and 'on' or 'off',
-        cfg.cursor_spin and 'on' or 'off');
+        cfg.cursor_spin and 'on' or 'off', cfg.cursor_lift or 0);
 end
 
 local function one_of(list, v)
@@ -2478,8 +2481,8 @@ local function one_of(list, v)
     return false;
 end
 
--- /goomui cursor [on|off | style <s> | color|sub <c> | size <n> | float|spin [on|off] | preset <name>
---   | set <on|off> <style> <colour> <sub> <size> <float on|off> <spin on|off>]   (set: all at once, for Apply to all)
+-- /goomui cursor [on|off | style <s> | color|sub <c> | size <n> | float|spin [on|off] | lift <px> | preset <name>
+--   | set <on|off> <style> <colour> <sub> <size> <float on|off> <spin on|off> [lift]]   (set: all at once, Apply to all)
 function M.cursor_command(args)
     local opt = (#args >= 3) and args[3]:lower() or nil;
     local val = (#args >= 4) and args[4]:lower() or nil;
@@ -2505,6 +2508,8 @@ function M.cursor_command(args)
         cfg[(opt == 'sub') and 'cursor_sub' or 'cursor_color'] = val;
     elseif (opt == 'size' and tonumber(args[4]) ~= nil) then
         cfg.cursor_size = math.max(0.5, math.min(3.0, tonumber(args[4])));
+    elseif (opt == 'lift' and tonumber(args[4]) ~= nil) then
+        cfg.cursor_lift = math.max(0, math.min(40, math.floor(tonumber(args[4]) + 0.5)));
     elseif (opt == 'float') then
         cfg.cursor_float = flag(cfg.cursor_float);
     elseif (opt == 'spin') then
@@ -2522,14 +2527,18 @@ function M.cursor_command(args)
         for i = 4, 10 do v[i] = args[i]:lower(); end
         if (not one_of(M.CURSOR_STYLES, v[5]) or not one_of(M.CURSOR_COLORS, v[6]) or not one_of(M.CURSOR_COLORS, v[7])
             or tonumber(v[8]) == nil) then
-            print('goomui cursor set <on|off> <style> <colour> <sub> <size> <float on|off> <spin on|off>');
+            print('goomui cursor set <on|off> <style> <colour> <sub> <size> <float on|off> <spin on|off> [lift]');
             return;
         end
         cfg.cursor, cfg.cursor_style, cfg.cursor_color, cfg.cursor_sub = (v[4] == 'on'), v[5], v[6], v[7];
         cfg.cursor_size = math.max(0.5, math.min(3.0, tonumber(v[8])));
         cfg.cursor_float, cfg.cursor_spin = (v[9] == 'on'), (v[10] == 'on');
+        if (tonumber(args[11]) ~= nil) then
+            cfg.cursor_lift = math.max(0, math.min(40, math.floor(tonumber(args[11]) + 0.5)));
+        end
     else
-        print('/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | preset <name>');
+        print('/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | lift <px>'
+            .. ' | preset <name>');
         return;
     end
     settings.save('ring');
@@ -2538,9 +2547,9 @@ end
 
 -- Apply to all: these settings on every character (MultiSend /mss, this one included). Returns the command sent.
 function M.cursor_apply_all()
-    local cmd = ('/mss /goomui cursor set %s %s %s %s %.2f %s %s'):fmt(cfg.cursor ~= false and 'on' or 'off',
+    local cmd = ('/mss /goomui cursor set %s %s %s %s %.2f %s %s %d'):fmt(cfg.cursor ~= false and 'on' or 'off',
         cfg.cursor_style, cfg.cursor_color, cfg.cursor_sub, cfg.cursor_size or 1.0, cfg.cursor_float and 'on' or 'off',
-        cfg.cursor_spin and 'on' or 'off');
+        cfg.cursor_spin and 'on' or 'off', cfg.cursor_lift or 0);
     AshitaCore:GetChatManager():QueueCommand(-1, cmd);
     return cmd;
 end

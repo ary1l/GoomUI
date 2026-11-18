@@ -57,9 +57,10 @@
 | `/goomui cursor style gem\|flat\|hollow\|crystal` | style |
 | `/goomui cursor color\|sub <colour>` | cursor / sub-target colour (`white`, `kind`, `mp`, `tp`, ...; a wrong name lists them) |
 | `/goomui cursor size <n>` | 0.5-3 |
+| `/goomui cursor lift <px>` | how much higher over players, 0-40 (clears their master level stars) |
 | `/goomui cursor float\|spin [on\|off]` | drift up and down / turn the crystal (no word: toggle) |
 | `/goomui cursor preset <name>` | goomui, classic, crystal, minimal |
-| `/goomui cursor set <on\|off> <style> <colour> <sub> <size> <float> <spin>` | all at once (what *Apply to all* sends) |
+| `/goomui cursor set <on\|off> <style> <colour> <sub> <size> <float> <spin> [lift]` | all at once (what *Apply to all* sends) |
 
 ## AAEV
 

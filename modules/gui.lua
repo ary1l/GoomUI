@@ -166,7 +166,8 @@ local function tab_ring(c, ring)
     if (imgui.Button('Reset ring defaults##thud_ring_reset')) then
         reset(c, ring.defaults, { geo = true, geo_slices = true, geo_radius = true, geo_cap = true, geo_scan = true,
             geo_cure = true, geo_buffs = true, geo_bubble = true, geo_indi_jp = true, cursor = true, cursor_color = true,
-            cursor_sub = true, cursor_size = true, cursor_style = true, cursor_float = true, cursor_spin = true });
+            cursor_sub = true, cursor_size = true, cursor_style = true, cursor_float = true, cursor_spin = true,
+            cursor_lift = true });
         ring.set_cfg(c);
         settings.save('ring');
     end
@@ -246,6 +247,7 @@ local function tab_cursor(c, ring)
     cursor_colour(c, ring, 'Colour##thud_ccol', 'cursor_color');
     cursor_colour(c, ring, 'Sub-target colour##thud_csub', 'cursor_sub');
     slider(c, 'ring', 'Size##thud_csize', 'cursor_size', 0.5, 3.0, '%.2f', false);
+    slider(c, 'ring', 'Lift over players##thud_clift', 'cursor_lift', 0, 40, '%.0f px', true);
     check(c, 'ring', 'Float (drifts up and down)', 'cursor_float');
     check(c, 'ring', 'Spin (crystal)', 'cursor_spin');
 
@@ -264,6 +266,7 @@ local function tab_cursor(c, ring)
     imgui.TextColored(DIM, 'Sends these settings to every character with /mss (MultiSend).');
     imgui.TextColored(DIM, 'Sub-target colour: your first target while you pick another,');
     imgui.TextColored(DIM, 'and item / <stnpc> / <stpc> picks. Target kind: the ring colours.');
+    imgui.TextColored(DIM, 'Lift over players: clears the master level stars on their nameplate.');
 end
 
 local function tab_look(c)
