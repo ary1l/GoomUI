@@ -94,6 +94,8 @@ local default_cfg = T{
     debuff_icon   = 18,      -- their icon size, px
     show_pool     = true,    -- treasure pool window (modules/pool.lua); shown while the pool has items
     pool_x = 1010, pool_y = 520,
+    pool_dock     = true,    -- a one-line summary by the party list; click it for the full window (false: window only)
+    pool_open     = false,   -- the full window shown (docked: toggled by clicking the summary)
     debuffs_below = false,   -- debuff row under its target panel instead of above (other panels still stack up)
     locked        = true,
     theme         = 'vivid', -- colour preset for every goomui bar (modules/theme.lua)
