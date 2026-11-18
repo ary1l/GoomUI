@@ -205,8 +205,19 @@ local function sorted_lots(h)
     return list;
 end
 
+-- A row's lots, passes and waiting count flow left to right and start a new line when the next piece does not fit
+-- (always on the same line, a piece near the edge wrapped one letter per line). A piece wider than the row wraps
+-- from a line start (the window's wrap position), and the next one starts below it.
+local ROW_W = WIDTH - 24; -- inside the window padding and the row indent
+local lineX = 0;          -- px used on the current line
 local function inline(col, s, first)
-    if (not first) then imgui.SameLine(0, 6); end
+    local w = imgui.CalcTextSize(s);
+    if (not first) and (lineX + 6 + w <= ROW_W) then
+        imgui.SameLine(0, 6);
+        lineX = lineX + 6 + w;
+    else
+        lineX = (w > ROW_W) and ROW_W or w;
+    end
     imgui.TextColored(col, s);
 end
 
