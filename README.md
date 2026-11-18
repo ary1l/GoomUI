@@ -57,7 +57,8 @@ are used as they are
 
 ## First steps
 
-1. `/goomui` opens the settings window (tabs: Look, Party, Bar, Ring, GEO, AAEV). Pick a colour preset in Look.
+1. `/goomui` opens the settings window (tabs: Look, Party, Bar, Ring, Cursor, GEO, AAEV). Pick a colour preset in Look;
+   *Apply to all characters* sends it to your other characters (MultiSend).
 2. **Party:** *Party setup* (or `/goomui setup`) shows drag boxes for the three lists and the list options;
    `/goomui setup` again saves.
 3. **Target bar:** Bar tab, uncheck *Lock position*, drag, check it again. The AAEV chart follows it.
@@ -74,7 +75,7 @@ are used as they are
 | `/goomui aaev demo` | chart with sample data |
 | `/goomui look next\|prev\|<preset>` | try colour presets in game |
 | `/goomui ring on\|off` | target rings |
-| `/goomui ring cursor on\|off` | target cursor |
+| `/goomui cursor on\|off` | target cursor (styles, colours: Cursor tab) |
 | `/goomui geo on\|off` | GEO bubble rings |
 
 [All commands](docs/commands.md).

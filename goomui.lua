@@ -239,7 +239,7 @@ ashita.events.register('d3d_present', 'thud_gui_draw',  guard('Settings window',
 local function say(s) print(chat.header(addon.name):append(chat.message(s))); end
 
 -- /goomui look ...: preset by name or next / prev; shape / texture / frame.
-local function look_command(a, b)
+local function look_command(a, b, args)
     if (cfg.bar == nil) then return; end
     local order = theme.PRESET_ORDER;
     if (a == 'next' or a == 'prev') then
@@ -260,6 +260,16 @@ local function look_command(a, b)
     elseif (a == 'frame') then
         local on = (b == 'on') or (b == nil and not theme.frame);
         gui.on_look(theme.shape, theme.texture, on);
+    elseif (a == 'set' and args ~= nil and #args >= 9) then
+        -- /goomui look set <preset> <shape> <texture> <frame on|off> <panel> <opacity>: all at once (Apply to all)
+        local v = function (i) return args[i]:lower(); end
+        if (theme.PRESETS[v(4)] == nil or tonumber(args[9]) == nil) then
+            say('look set <preset> <shape> <texture> <frame on|off> <panel> <opacity>');
+            return;
+        end
+        gui.on_theme(v(4));
+        gui.on_look(v(5), v(6), v(7) == 'on');
+        gui.on_panel(v(8), tonumber(args[9]));
     elseif (a ~= nil) then
         local names = {};
         for _, n in ipairs(order) do names[#names + 1] = n; end
@@ -283,7 +293,7 @@ local HELP = {
     '/goomui ring on|off|depth|arrow|runes|fade|flip',
     '/goomui ring scale <n> | slices <n>',
     '/goomui ring range on|off|geo|hitbox | base <n> | fill <n>',
-    '/goomui ring cursor [on|off] | color|sub <colour> | size <n>',
+    '/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | preset <name>',
     '/goomui geo [on|off|buffs|cure|bubble|clear | radius|cap|scan|slices <n>]',
     '/goomui aaev on|off             enable / disable auto-attack chart',
     '/goomui aaev [show|hide|demo|lock|unlock|zone|help ...]',
@@ -306,7 +316,7 @@ ashita.events.register('command', 'thud_command', function (e)
         local m = pool.command(args[3] and args[3]:lower() or nil);
         if (m ~= nil) then say(m); end
     elseif (sub == 'look') then
-        look_command(args[3] and args[3]:lower() or nil, args[4] and args[4]:lower() or nil);
+        look_command(args[3] and args[3]:lower() or nil, args[4] and args[4]:lower() or nil, args);
     elseif (sub == 'ring') then
         -- Old /tring layout: args[2] = sub-command. Drop the 'ring' word.
         local a = { args[1] };
@@ -314,6 +324,8 @@ ashita.events.register('command', 'thud_command', function (e)
         ring.command(a);
     elseif (sub == 'geo') then
         ring.command(args);     -- already /tring geo <opt> <val> layout
+    elseif (sub == 'cursor') then
+        ring.cursor_command(args);
     elseif (sub == 'aaev') then
         local opt = args[3] and args[3]:lower() or nil;
         if (opt == 'on' or opt == 'off') then

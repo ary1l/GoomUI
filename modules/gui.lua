@@ -113,12 +113,14 @@ local function tab_bar(c, bar)
 end
 
 -- Target cursor colour: White or a palette colour, each shown with its swatch in the current preset.
-local CURSOR_NAMES = { white = 'White', hp_full = 'HP', hp_50 = 'HP half', hp_0 = 'HP low', mp = 'MP', tp = 'TP',
+local CURSOR_NAMES = { white = 'White', kind = 'Target kind', hp_full = 'HP', hp_50 = 'HP half', hp_0 = 'HP low',
+    mp = 'MP', tp = 'TP',
     tp_rdy = 'TP ready', tp_max = 'TP 3000', spell = 'Spell', item = 'Item', hit = 'Hit', crit = 'Crit', ws = 'WS',
     heal = 'Heal', counter = 'Counter', r3 = 'Roll' };
 local SWATCH = { 12, 12 };
+local KIND_SWATCH = { 255, 106, 60 }; -- Target kind: mobs (the ring colours; players blue, NPCs green)
 local function cursor_f4(key)
-    local p = (key ~= 'white') and theme.P[key] or nil;
+    local p = (key == 'kind') and KIND_SWATCH or ((key ~= 'white') and theme.P[key] or nil);
     if (p == nil) then return theme.f4(245, 245, 245); end
     return theme.f4(p[1], p[2], p[3]);
 end
@@ -159,17 +161,12 @@ local function tab_ring(c, ring)
     slider(c, 'ring', 'Base range##thud_rbase', 'range_base', 1.0, 50.0, '%.1f', false, hook);
     slider(c, 'ring', 'Fill strength##thud_rfill', 'range_fill', 0.02, 0.60, '%.2f', false, hook);
 
-    imgui.Separator();
-    imgui.TextColored(HEADER, 'Target cursor');
-    check(c, 'ring', 'Cursor over your target', 'cursor', hook);
-    cursor_colour(c, ring, 'Colour##thud_ccol', 'cursor_color');
-    cursor_colour(c, ring, 'Sub-target colour##thud_csub', 'cursor_sub');
-    slider(c, 'ring', 'Size##thud_csize', 'cursor_size', 0.5, 3.0, '%.2f', false, hook);
 
     imgui.Separator();
     if (imgui.Button('Reset ring defaults##thud_ring_reset')) then
         reset(c, ring.defaults, { geo = true, geo_slices = true, geo_radius = true, geo_cap = true, geo_scan = true,
-            geo_cure = true, geo_buffs = true, geo_bubble = true, geo_indi_jp = true });
+            geo_cure = true, geo_buffs = true, geo_bubble = true, geo_indi_jp = true, cursor = true, cursor_color = true,
+            cursor_sub = true, cursor_size = true, cursor_style = true, cursor_float = true, cursor_spin = true });
         ring.set_cfg(c);
         settings.save('ring');
     end
@@ -234,6 +231,41 @@ local function look_button(label, on, id)
     return imgui.Button((on and '> ' or '  ') .. label .. '##' .. id);
 end
 
+local CURSOR_STYLE_NAMES = { gem = 'Gem', flat = 'Flat', hollow = 'Hollow', crystal = 'Crystal' };
+local function tab_cursor(c, ring)
+    imgui.TextColored(HEADER, 'Target cursor');
+    check(c, 'ring', 'Cursor over your target', 'cursor');
+    imgui.Text('Style  ');
+    for _, k in ipairs(ring.CURSOR_STYLES) do
+        imgui.SameLine();
+        if (look_button(CURSOR_STYLE_NAMES[k] or k, c.cursor_style == k, 'gui_cstyle_' .. k)) then
+            c.cursor_style = k;
+            settings.save('ring');
+        end
+    end
+    cursor_colour(c, ring, 'Colour##thud_ccol', 'cursor_color');
+    cursor_colour(c, ring, 'Sub-target colour##thud_csub', 'cursor_sub');
+    slider(c, 'ring', 'Size##thud_csize', 'cursor_size', 0.5, 3.0, '%.2f', false);
+    check(c, 'ring', 'Float (drifts up and down)', 'cursor_float');
+    check(c, 'ring', 'Spin (crystal)', 'cursor_spin');
+
+    imgui.Separator();
+    imgui.TextColored(HEADER, 'Presets');
+    for i, p in ipairs(ring.CURSOR_PRESETS) do
+        if (i > 1) then imgui.SameLine(); end
+        if (imgui.Button(p[1] .. '##gui_cpre_' .. i)) then
+            c.cursor_style, c.cursor_color, c.cursor_sub = p[2], p[3], p[4];
+            settings.save('ring');
+        end
+    end
+
+    imgui.Separator();
+    if (imgui.Button('Apply to all characters##gui_cursor_all')) then ring.cursor_apply_all(); end
+    imgui.TextColored(DIM, 'Sends these settings to every character with /mss (MultiSend).');
+    imgui.TextColored(DIM, 'Sub-target colour: your first target while you pick another,');
+    imgui.TextColored(DIM, 'and item / <stnpc> / <stpc> picks. Target kind: the ring colours.');
+end
+
 local function tab_look(c)
     imgui.TextColored(HEADER, 'Colour preset (bars, party list, AAEV)');
     -- two presets per row: [name][swatches]   [name][swatches]
@@ -287,6 +319,12 @@ local function tab_look(c)
     end
 
     imgui.Separator();
+    if (imgui.Button('Apply to all characters##gui_look_all')) then
+        AshitaCore:GetChatManager():QueueCommand(-1, ('/mss /goomui look set %s %s %s %s %s %.2f'):fmt(
+            theme.current or theme.DEFAULT, theme.shape, theme.texture, theme.frame and 'on' or 'off', theme.panel_style,
+            theme.panel_alpha));
+    end
+    imgui.TextColored(DIM, 'Sends this look to every character with /mss (MultiSend).');
     imgui.TextColored(DIM, 'Saved per character (bar.lua). Panel tints and stripes do not change.');
     imgui.TextColored(DIM, 'Try them in game: /goomui look next | prev | <preset>');
     imgui.TextColored(DIM, 'AAEV uses its own colours if Layout > goomui colours is off.');
@@ -331,6 +369,10 @@ function G.render(cfg, bar, ring, aaev, party)
             end
             if (imgui.BeginTabItem('Ring##thud_tab_ring')) then
                 tab_ring(ring_cfg, ring);
+                imgui.EndTabItem();
+            end
+            if (imgui.BeginTabItem('Cursor##thud_tab_cursor')) then
+                tab_cursor(ring_cfg, ring);
                 imgui.EndTabItem();
             end
             if (imgui.BeginTabItem('GEO##thud_tab_geo')) then
