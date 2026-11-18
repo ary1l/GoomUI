@@ -2,7 +2,7 @@
     goomui: party module. Was the standalone goomUI 1.6.0 addon;
     now loaded by goomui.lua next to the bar / ring / AAEV modules. Bars use theme.lua.
     Lean party + alliance list for Ashita v4.
-    Based on XivParty: Tylas (Windower original), Tirem (Ashita port). See LICENSE.
+    Based on XivParty: Tylas (Windower original), Tirem (Ashita port). See LICENSE-XivParty.
     Debuff ids: debuffs.lua (from XIUI bufftable.lua + 5 corrections). Buffs shown in game order.
 
     Render: one ID3DXSprite pass (bars, icons, borders) then Ashita font objects with
@@ -16,7 +16,7 @@
       0x000A / 0x000B ................. atom0s XiPackets (0x000B LogoutState 4 = cancelled, stays in zone)
       IParty / statusiconsentry_t ..... Ashita v4 SDK ffxi/party.h
       recast loop / names ............. Ashita 'recast' addon (atom0s)
-      mouse e.x/e.y, msg 512 .......... Ashita 'crosshair' addon (atom0s)
+      hide-UI sigs, mouse position .... modules/ui.lua (Tirem statushelpers / Velyn; atom0s crosshair)
       ManualRender + get_text_size .... Ashita 'equipmon' addon (atom0s)
       sprite Draw colour .............. alpha scaling as Ashita 'equipmon' (atom0s); RGB tint as this addon's bar fills
       gdifonts destroy_interface ...... libs/gdifonts/readme.md (Thorny): required on unload
@@ -25,8 +25,6 @@
       icon override 623 -> 62 ......... XIUI libs/texturemanager.lua
       20.8' Cure range, 50' target .... FFXIclopedia "Distance"
 ]]--
-
-local FILE_T0 = ashita.time.clock().micro; -- load-time measurement
 
 require('common');
 local chat     = require('chat');
@@ -37,6 +35,7 @@ local settings = require('settings');
 local scaling  = require('scaling');
 local socket   = require('socket');
 local theme    = require('modules/theme');
+local ui       = require('modules/ui');
 
 local M = { };
 
@@ -112,23 +111,10 @@ local visible  = false;
 local zoning   = false;
 local zoneHold = 0;
 local lastTick = 0;
-local mouseX, mouseY = -1, -1;
 local tickNow = 0; -- ms, set each tick
 
--- /goomui perf: timing report. usNow() is a no-op (0) outside the perf / after-load windows:
--- ashita.time.clock() builds a table per call, so it is not used in steady state.
-local perf;
-local function usNow()
-    if (perf.on or ashita.time.get_tick64() < perf.frameEnd) then return ashita.time.clock().micro; end
-    return 0;
-end
-perf = { on = false, stop = 0, tickMax = 0, tickSum = 0, tickN = 0, drawMax = 0, drawSum = 0, drawN = 0,
-               fonts = 0, fontUs = 0, fontMax = 0, icons = 0, iconUs = 0, iconMax = 0, initUs = 0, sigUs = 0, sigN = 0,
-               crewMax = 0, abilScanUs = 0, bootEnd = 0, bootTickMax = 0, texN = 0, texUs = 0, gdiUs = 0,
-               -- whole-frame gaps after load (catches cost outside goomui's Lua, e.g. Ashita font builds, other addons)
-               fileUs = 0, loadTick = 0, frameEnd = 0, lastFrame = 0, gapMax = 0, gapAt = 0, gap50 = 0, frames = 0,
-               gapTick = 0, gapFonts = 0, gapIcons = 0, curTick = 0, lastFonts = 0, lastIcons = 0,
-               curUI = 0, curPkt = 0, lastTexN = 0, curTex = 0, top = {} }; -- top: 5 slowest frames
+-- /goomui perf: 10 s tick / draw timing report.
+local perf = { on = false, stop = 0, tickMax = 0, tickSum = 0, tickN = 0, drawMax = 0, drawSum = 0, drawN = 0 };
 
 -- Errors inside the frame callbacks are caught and printed at most once per 10 s (no chat spam).
 local errNext = 0;
@@ -234,49 +220,11 @@ end
 -------------------------------------------------------------------------------
 -- game state helpers
 -------------------------------------------------------------------------------
--- hide-UI signatures from Tirem statushelpers (credit Velyn)
--- scanned lazily, one per tick (avoids a load-time burst)
-local pMenu, pEvent, pHide = nil, nil, nil;
-local SIGS = {
-    { 'pMenu',  '8B480C85C974??8B510885D274??3B05', 16 },
-    { 'pEvent', 'A0????????84C0741AA1????????85C0741166A1????????663B05????????0F94C0C3', 0 },
-    { 'pHide',  '8B4424046A016A0050B9????????E8????????F6D81BC040C3', 0 },
-};
-local function scanNextSig() -- returns true when all three are resolved
-    if (perf.sigN >= #SIGS) then return true; end
-    local t0 = usNow();
-    local sg = SIGS[perf.sigN + 1];
-    local v = ashita.memory.find('FFXiMain.dll', 0, sg[2], sg[3], 0);
-    if (sg[1] == 'pMenu') then pMenu = v; elseif (sg[1] == 'pEvent') then pEvent = v; else pHide = v; end
-    perf.sigN = perf.sigN + 1;
-    perf.sigUs = perf.sigUs + (usNow() - t0);
-    return perf.sigN >= #SIGS;
-end
-
-local function menuName()
-    if (pMenu == 0) then return ''; end
-    local p = ashita.memory.read_uint32(pMenu);
-    if (p == 0) then return ''; end
-    p = ashita.memory.read_uint32(p);
-    if (p == 0) then return ''; end
-    p = ashita.memory.read_uint32(p + 4);
-    if (p == 0) then return ''; end
-    local s = ashita.memory.read_string(p + 0x46, 16) or '';
-    return (s:gsub('\x00', ''));
-end
-
+-- Cutscene / hidden interface / map (modules/ui.lua): signatures resolved one per tick (no load-time burst).
 local uiCache, uiNext = false, 0;
 local function uiBlockedRaw()
-    if (not scanNextSig()) then return false; end
-    if (pEvent ~= 0) then
-        local p = ashita.memory.read_uint32(pEvent + 1);
-        if (p ~= 0 and ashita.memory.read_uint8(p) == 1) then return true; end
-    end
-    if (pHide ~= 0) then
-        local p = ashita.memory.read_uint32(pHide + 10);
-        if (p ~= 0 and ashita.memory.read_uint8(p + 0xB4) == 1) then return true; end
-    end
-    return menuName():find('map', 1, true) ~= nil;
+    if (not ui.warm()) then return false; end
+    return ui.event() or ui.hidden() or ui.menu():find('map', 1, true) ~= nil;
 end
 
 local function uiBlocked()
@@ -426,7 +374,7 @@ local function u32(get, o)
 end
 
 -- Each 0x0076 (and the statusicons block) is a full snapshot of the other 5 members, so ids not
--- in it are dropped: a member who left/rejoined no longer shows stale icons.
+-- in it are dropped: a member who left/rejoined shows no stale icons.
 local seenSid = {};
 local function readAllEntries(get, start)
     for k in pairs(seenSid) do seenSid[k] = nil; end
@@ -499,7 +447,6 @@ end
 
 local function crewScanStep() -- 128 ability ids per call, only when a fallback was needed
     if (not crew.scanWant or crew.scanDone) then return; end
-    local t0 = usNow();
     local last = math.min(crew.scanPos + 127, 2048);
     for i = crew.scanPos, last do
         local b = resMgr:GetAbilityById(i);
@@ -509,7 +456,6 @@ local function crewScanStep() -- 128 ability ids per call, only when a fallback 
     end
     crew.scanPos = last + 1;
     if (crew.scanPos > 2048) then crew.scanDone = true; end
-    perf.abilScanUs = perf.abilScanUs + (usNow() - t0);
 end
 
 local function spellName(id)
@@ -650,10 +596,7 @@ local function crewTick(now)
         for key, e in pairs(crew.data) do -- forget boxes silent for 60 s (setup preview entry excepted)
             if (key ~= 'member2' and now - e.t > 60) then crew.data[key] = nil; end
         end
-        local t0 = usNow();
         local payload = buildPayload();
-        local dt = usNow() - t0;
-        if (dt > perf.crewMax) then perf.crewMax = dt; end
         if (payload ~= nil) then
             if (payload ~= crew.lastPayload) then -- own entry for self-hover; re-parse only on change
                 crew.lastPayload = payload;
@@ -762,7 +705,6 @@ local function getIcon(id)
     end
     if (F.iconBudget <= 0) then return nil; end -- load next tick
     F.iconBudget = F.iconBudget - 1;
-    local t0 = usNow();
     F.icons[id] = false;
     local rid = ICON_OVERRIDE[id] or id;
     if (rid < 1 or rid > 0x3FF) then return nil; end
@@ -779,9 +721,6 @@ local function getIcon(id)
     e = { tex = ffi.cast('IDirect3DTexture8*', tp[0]), rect = ffi.new('RECT', { 0, 0, w, h }), w = w, used = F.pass };
     F.icons[id] = e;
     F.iconCount = F.iconCount + 1;
-    local dt = usNow() - t0;
-    perf.icons, perf.iconUs = perf.icons + 1, perf.iconUs + dt;
-    if (dt > perf.iconMax) then perf.iconMax = dt; end
     return e;
 end
 
@@ -904,7 +843,6 @@ local function gdiH(h) return floor(h * S.textScale * 1.3 + 0.5); end -- gdifont
 local VC_FIX = 0.6; -- vertical-centering correction (fraction of font px)
 
 local function newText(h)
-    local t0 = usNow();
     local ok, g = pcall(gdi.create_object, gdi, {
         box_height = 0, box_width = 0, font_alignment = gdi.Alignment.Left,
         font_color = 0xFFFFFFFF, font_family = S.font, font_flags = gdi.FontFlags.Bold,
@@ -920,9 +858,6 @@ local function newText(h)
     local o = { g = g, text = '', x = -1000, y = -1000, h = -1, c = 0xFFFFFFFF, fam = S.font, w = 0, hh = 0, on = false, tex = nil, rect = nil };
     F.texts[#F.texts + 1] = o;
     F.budget = F.budget - 1;
-    local dt = usNow() - t0;
-    perf.fonts, perf.fontUs = perf.fonts + 1, perf.fontUs + dt;
-    if (dt > perf.fontMax) then perf.fontMax = dt; end
     return o;
 end
 
@@ -944,10 +879,8 @@ local function refreshTex(o)
     o.ticket = nil;
     local old = g.texture;
     g.is_dirty = true;
-    local t0 = usNow();
     local tex, r = g:get_texture();
     if (tex ~= nil) then
-        perf.texN, perf.texUs = perf.texN + 1, perf.texUs + (usNow() - t0);
         if (old ~= nil and old ~= tex) then ffi.gc(old, nil); old:Release(); end
         o.tex, o.rect, o.w, o.hh, o.retryAt = tex, r, r.right, r.bottom, nil;
     else
@@ -1057,9 +990,7 @@ local function createSprite()
 end
 
 local function initRenderer()
-    local t0 = usNow();
     if (gdi == nil and not gdiFailed) then
-        local tg = usNow();
         local ok, lib = pcall(require, 'libs/gdifonts/include'); -- ffi.load of the DLL + font manager
         if (ok and type(lib) == 'table') then
             gdi = lib;
@@ -1068,7 +999,6 @@ local function initRenderer()
             gdiFailed = true;
             print(chat.header(addon.name):append(chat.error('gdifonts failed to load; text disabled: ' .. tostring(lib))));
         end
-        perf.gdiUs = usNow() - tg;
     end
     F = { rows = {}, texts = {}, icons = {}, iconCount = 0, selfNext = 0, budget = FONT_BUDGET, iconBudget = ICON_BUDGET,
           ticketNext = 1, serveTo = 0, lastTick = 0, spriteRetry = 0, pass = 0,
@@ -1095,9 +1025,6 @@ local function initRenderer()
     F.unit = ffi.new('RECT', { 0, 0, 1, 1 });
     seedBuffs();
     rederiveAll();
-    perf.initUs = usNow() - t0;
-    perf.bootEnd = ashita.time.get_tick64() + 15000; -- always time ticks for 15 s after init
-    perf.frameEnd = math.max(perf.frameEnd, perf.bootEnd);
 end
 
 local function destroyRenderer()
@@ -1217,7 +1144,7 @@ local function nameColor(d, c) return leaderColor(d, c) or 0xFFFFFFFF; end
 
 -- leader star: a drawn sprite (white star, black outline like the text), tinted the name's leader colour, right
 -- after the name. Not a font glyph: the bundled gdifonttexture.dll reads text as ANSI, so U+2605 came out garbled.
-local function leaderStar(R, d, c, m, h, s)
+local function leaderStar(R, d, c, m, s)
     local col = S.leaderStar and leaderColor(d, c) or nil;
     local n = R.name;
     if (col == nil or not n.on or n.cy == nil or F.star == nil) then return; end
@@ -1270,7 +1197,7 @@ local function layParty(R, d, ox, oy, s, sel, sub, c)
     put(R, 'sub',  R.sjT, 0, hy + 6 * s, fsz(10, s), jobArgb(d.sj, 0xFFA8A8A8), jx, true);
     put(R, 'name', d.name, nx, oy + 8 * s, fsz(12, s), fade(nameColor(d, c), m), nil, true);
     qmBorder(R.name, d);
-    leaderStar(R, d, c, m, fsz(12, s), s);
+    leaderStar(R, d, c, m, s);
 
     if (d.inZone) then
         local half = (bw - 4) / 2;
@@ -1306,7 +1233,7 @@ end
 
 -- full alliance row (26 px): NIN  Name  2544 / HP bar / TP bar
 local function layAlly(R, d, ox, oy, s, sel, sub, c)
-    local bw, W, C = aBW(), aW(), S.color;
+    local bw, W = aBW(), aW();
     local m = rangeMult(d);
     cacheTexts(R, d);
     lofiOff(R);
@@ -1317,7 +1244,7 @@ local function layAlly(R, d, ox, oy, s, sel, sub, c)
     put(R, 'main', R.mjT, 0, cy, fsz(10, s), jobArgb(d.mj, 0xFFFFFFFF), ox + A.jw * s, true);
     put(R, 'name', d.name, nx, cy, fsz(10, s), fade(nameColor(d, c), m), nil, true);
     qmBorder(R.name, d);
-    leaderStar(R, d, c, m, fsz(10, s), s);
+    leaderStar(R, d, c, m, s);
     if (d.inZone) then
         tbar(nx, oy + 15 * s, bw * s, 5 * s, d.hpp / 100, theme.HP_ARGB[lutPct(d.hpp)], m);
         tbar(nx, oy + 21 * s, bw * s, 3 * s, math.min(d.tp, 3000) / 3000, theme.tp_argb(d.tp), m);
@@ -1365,7 +1292,7 @@ local function layPartyLo(R, d, ox, oy, s, sel, sub, c)
     local cy1, cy2 = oy + 9 * s, oy + 28 * s;
     lofiMark(R, sel, sub, ox, cy1, f11);
     put(R, 'name', d.name, ox + 14 * s, cy1, f12, fade(lofiNameColor(d, c), rangeMult(d)), nil, true);
-    leaderStar(R, d, c, rangeMult(d), f12, s);
+    leaderStar(R, d, c, rangeMult(d), s);
     if (S.jobColors) then -- MNK99 / WAR55 as three texts (right to left): sub, grey slash, main
         local rx = ox + PL.w * s;
         put(R, 'sub', R.sjT, 0, cy1, f10, jobArgb(d.sj, 0xFFA8A8A8), rx, true);
@@ -1412,7 +1339,7 @@ local function layAllyLo(R, d, ox, oy, s, sel, sub, c)
     lofiMark(R, sel, sub, ox, cy, f10);
     put(R, 'main', R.mjT, ox + 10 * s, cy, f10, jobArgb(d.mj, 0xFFA8A8A8), nil, true);
     put(R, 'name', d.name, ox + 40 * s, cy, f10, fade(lofiNameColor(d, c), rangeMult(d)), nil, true);
-    leaderStar(R, d, c, rangeMult(d), f10, s);
+    leaderStar(R, d, c, rangeMult(d), s);
     if (d.inZone) then
         put(R, 'hp', R.hpT, 0, cy, f10, HP_TXT_LUT[lutPct(d.hpp)], ox + 196 * s, true);
         put(R, 'tp', R.tpT, 0, cy, f10, tpColorLo(d.tp), ox + AL.w * s, true);
@@ -1534,7 +1461,8 @@ local function hoverTip()
     if (F == nil or not hoverOn()) then return; end
     for i = 1, F.nHit do
         local x, y = F.HX[i], F.HY[i];
-        if (mouseX >= x and mouseX < x + F.HW[i] and mouseY >= y and mouseY < y + F.HH[i]) then
+        local mx, my = ui.mouse_x, ui.mouse_y;
+        if (mx >= x and mx < x + F.HW[i] and my >= y and my < y + F.HH[i]) then
             local e = crew.data[F.HN[i]];
             if (e ~= nil) then drawCrewTip(e, ashita.time.get_tick64() / 1000); end
             return;
@@ -1640,15 +1568,15 @@ local function ensurePositions()
         if (S.barW < 200) then S.barW = 200; end
         S.layoutVer = 2;
     end
-    if (S.layoutVer < 4) then -- 1.5.2: debuff marker is now a bright frame over the icon
-        S.color.debuffBg = defaults.color.debuffBg;
-    end
     if (S.layoutVer < 3) then -- 1.4: targetbar-style colors, 21.8' cast range
         S.color.mp, S.color.tp, S.color.tpReady = defaults.color.mp, defaults.color.tp, defaults.color.tpReady;
         if (S.castRange == 20.8) then S.castRange = 21.8; end
         S.layoutVer = 3;
     end
-    if (S.layoutVer < 4) then S.layoutVer = 4; end
+    if (S.layoutVer < 4) then -- 1.5.2: debuff marker is a bright frame over the icon
+        S.color.debuffBg = defaults.color.debuffBg;
+        S.layoutVer = 4;
+    end
     if (S.layoutVer < 5) then -- 2.0: sub-target row is brighter and framed
         S.color.sub, S.color.subFrame = defaults.color.sub, defaults.color.subFrame;
         S.layoutVer = 5;
@@ -1891,16 +1819,10 @@ function M.set_lowfi(on)
     M.command('lowfi');
 end
 
-ashita.events.register('mouse', 'goomui_mouse', function (e)
-    if (e.message == 512) then mouseX, mouseY = e.x, e.y; end -- WM_MOUSEMOVE
-end);
-
 ashita.events.register('packet_in', 'goomui_packet_in', function (e)
     if (e.id == 0x0076) then
         local data = e.data;
-        local t0 = usNow();
         readAllEntries(function (o) return data:byte(o + 1); end, 4); -- 4-byte header
-        perf.curPkt = perf.curPkt + (usNow() - t0);
     elseif (e.id == 0x000B) then
         -- LogoutState 4 (CANCELL): logout cancelled, client stays in zone and no 0x000A follows.
         -- Treating it as a zone left the list hidden until the next zone-in.
@@ -1920,83 +1842,38 @@ local function perfReport()
     print(chat.header(addon.name):append(chat.message(('tick avg %.3f / max %.3f ms (%d)  draw avg %.3f / max %.3f ms (%d)'):fmt(
         ms(perf.tickSum / math.max(perf.tickN, 1)), ms(perf.tickMax), perf.tickN,
         ms(perf.drawSum / math.max(perf.drawN, 1)), ms(perf.drawMax), perf.drawN))));
-    print(chat.header(addon.name):append(chat.message(('since load: worst tick in first 15s %.1f ms | init %.1f ms | sig scans %.1f ms (%d)'):fmt(
-        ms(perf.bootTickMax), ms(perf.initUs), ms(perf.sigUs), perf.sigN))));
-    print(chat.header(addon.name):append(chat.message(('text objs %d (%.1f ms) | text textures built %d: %.1f ms | gdifonts load %.1f ms | icons %d: %.1f ms, worst %.1f ms'):fmt(
-        perf.fonts, ms(perf.fontUs), perf.texN, ms(perf.texUs), ms(perf.gdiUs), perf.icons, ms(perf.iconUs), ms(perf.iconMax)))));
-    print(chat.header(addon.name):append(chat.message(('crew payload worst %.1f ms | ability name scan total %.1f ms'):fmt(
-        ms(perf.crewMax), ms(perf.abilScanUs)))));
-    print(chat.header(addon.name):append(chat.message(('file load %.1f ms | frames after load: worst gap %.0f ms at +%.1fs (goomui that frame: tick %.1f ms, fonts %d, icons %d) | gaps>50ms: %d of %d'):fmt(
-        ms(perf.fileUs), ms(perf.gapMax), perf.gapAt / 1000, ms(perf.gapTick), perf.gapFonts, perf.gapIcons, perf.gap50, perf.frames))));
-    for i, t in ipairs(perf.top) do
-        print(chat.header(addon.name):append(chat.message(('slow #%d: %.0f ms at +%.1fs | goomui prev frame: tick %.1f, ui %.1f, pkt %.1f ms, textures %d, new objs %d'):fmt(
-            i, ms(t.gap), t.at / 1000, ms(t.tick), ms(t.ui), ms(t.pkt), t.tex, t.fonts))));
-    end
+end
+
+-- Microseconds fn() took (only while /goomui perf runs: ashita.time.clock() builds a table per call).
+local function timed(fn)
+    local t0 = ashita.time.clock().micro;
+    fn();
+    return ashita.time.clock().micro - t0;
 end
 
 local function present()
     local now = ashita.time.get_tick64();
-    local fnow = (now < perf.frameEnd) and usNow() or nil;
-    if (fnow ~= nil) then
-        if (perf.lastFrame > 0) then -- gap since last frame includes last frame's goomui work
-            local gap = fnow - perf.lastFrame;
-            perf.frames = perf.frames + 1;
-            if (gap > 50000) then perf.gap50 = perf.gap50 + 1; end
-            if (gap > perf.gapMax) then
-                perf.gapMax, perf.gapAt = gap, now - perf.loadTick;
-                perf.gapTick, perf.gapFonts, perf.gapIcons = perf.curTick, perf.curFonts or 0, perf.curIcons or 0;
-            end
-            local top = perf.top; -- keep 5 slowest frames with goomui's work in the frame before
-            if (#top < 5 or gap > top[#top].gap) then
-                top[#top + 1] = { gap = gap, at = now - perf.loadTick, tick = perf.curTick, ui = perf.curUI,
-                                  pkt = perf.curPkt, tex = perf.curTex or 0, fonts = perf.curFonts or 0 };
-                table.sort(top, function (a, b) return a.gap > b.gap; end);
-                if (#top > 5) then top[6] = nil; end
-            end
-        end
-        perf.lastFrame = fnow;
-        perf.curTick, perf.curUI, perf.curPkt = 0, 0, 0;
-    end
     if (setup or now - lastTick >= (S.lowfi and S.lofiMs or S.updateMs)) then
         lastTick = now;
-        if (perf.on or now < perf.bootEnd or perf.bootEnd == 0) then
-            local t0 = usNow();
-            safeTick();
-            local dt = usNow() - t0;
-            perf.curTick = dt;
-            if (perf.on) then
-                perf.tickSum, perf.tickN = perf.tickSum + dt, perf.tickN + 1;
-                if (dt > perf.tickMax) then perf.tickMax = dt; end
-            end
-            if (now < perf.bootEnd or perf.bootEnd == 0) then
-                if (dt > perf.bootTickMax) then perf.bootTickMax = dt; end
-            end
+        if (perf.on) then
+            local dt = timed(safeTick);
+            perf.tickSum, perf.tickN = perf.tickSum + dt, perf.tickN + 1;
+            if (dt > perf.tickMax) then perf.tickMax = dt; end
         else
             safeTick();
         end
     end
     if (visible and F ~= nil and AshitaCore:GetFontManager():GetVisible()) then
         if (perf.on) then
-            local t0 = usNow();
-            draw();
-            local dt = usNow() - t0;
+            local dt = timed(draw);
             perf.drawSum, perf.drawN = perf.drawSum + dt, perf.drawN + 1;
             if (dt > perf.drawMax) then perf.drawMax = dt; end
         else
             draw();
         end
-        if (fnow ~= nil) then local t0 = usNow(); hoverTip(); perf.curUI = perf.curUI + (usNow() - t0);
-        else hoverTip(); end
+        hoverTip();
     end
-    if (setup) then
-        if (fnow ~= nil) then local t0 = usNow(); drawSetup(); perf.curUI = perf.curUI + (usNow() - t0);
-        else drawSetup(); end
-    end
-    if (fnow ~= nil) then -- objects/textures created during this frame
-        perf.curFonts, perf.curIcons = perf.fonts - perf.lastFonts, perf.icons - perf.lastIcons;
-        perf.curTex = perf.texN - perf.lastTexN;
-        perf.lastFonts, perf.lastIcons, perf.lastTexN = perf.fonts, perf.icons, perf.texN;
-    end
+    if (setup) then drawSetup(); end
     if (perf.on and now >= perf.stop) then perfReport(); end
 end
 -- Whole frame guarded (hover tip, setup window, perf too): an error is printed with its Lua stack instead of
@@ -2005,9 +1882,5 @@ ashita.events.register('d3d_present', 'goomui_present', function ()
     local ok, err = xpcall(present, debug.traceback);
     if (not ok) then reportErr('frame', err); end
 end);
-
-perf.fileUs   = ashita.time.clock().micro - FILE_T0;
-perf.loadTick = ashita.time.get_tick64();
-perf.frameEnd = perf.loadTick + 20000; -- watch frames for 20 s after load (extended to init + 15 s)
 
 return M;

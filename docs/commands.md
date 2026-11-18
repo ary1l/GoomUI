@@ -59,7 +59,6 @@
 | `/goomui cursor size <n>` | 0.5-3 |
 | `/goomui cursor lift <px>` | how much higher over players, 0-40 (clears their master level stars) |
 | `/goomui cursor float\|spin [on\|off]` | drift up and down / turn the crystal (no word: toggle) |
-| `/goomui cursor preset <name>` | goomui, classic, crystal, minimal |
 | `/goomui cursor set <on\|off> <style> <colour> <sub> <size> <float> <spin> [lift]` | all at once (what *Apply to all* sends) |
 
 ## AAEV

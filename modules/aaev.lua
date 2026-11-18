@@ -10,6 +10,7 @@ local chat  = require('chat');
 local slib  = require('settings');
 local data  = require('modules/aaev_data');
 local theme = require('modules/theme');
+local parse_action = require('modules/action');
 local scaling = require('scaling');
 
 local M = { };
@@ -32,9 +33,8 @@ local default_settings = T{
     AutoDemo = false,
     ChartBars = 20, ChartStartX = 500, ChartStartY = 500, ChartWidth = 100, ChartHeight = 43,
     BarsAlpha = 255,
-    -- NOTE(aryl): 'round' = one bar per attack round (packet), height = round damage,
-    -- color = swing count so double/triple/quad attacks read at a glance.
-    -- 'swing' = the original one-bar-per-swing chart.
+    -- 'round' = one bar per attack round (packet): height = round damage, colour = swing count.
+    -- 'swing' = one bar per swing.
     BarMode = 'round',
     ColorRound1 = { 0, 0, 237 }, ColorRound2 = { 0, 170, 255 },
     ColorRound3 = { 60, 220, 120 }, ColorRound4 = { 255, 200, 0 },
@@ -54,9 +54,7 @@ local default_settings = T{
     DisplayZoneAcc = true, ZoneAccLabelPrefix = 'Zone: ',
     DisplayLast = true, LastLabelPrefix = 'Last: ',
     DisplayRoundCount = false, RoundLabelPrefix = 'Rd: ',
-    -- FIX: short single-char prefixes (narrow HUD). Set false for wordy Max:/Hit: etc.
-    -- Defaults are ASCII (M L H C ~ Z + #). Override any per-key, e.g. GlyphMax='⌂',
-    -- but non-ASCII glyphs tofu unless Ashita's font atlas has them.
+    -- Single-letter label prefixes (M L A C ~ Z + #), per key overridable (GlyphMax etc.; ASCII only).
     GlyphLabels = false,
     ResetOnTargetChange = true,
     SingleLineLabels = false,
@@ -70,7 +68,6 @@ local default_settings = T{
     PetChart = true, PetChartBars = 20, PetChartStartX = 500, PetChartStartY = 650,
     PetChartWidth = 100, PetChartHeight = 43, PetWeaponskillCount = 5,
     -- goomui look
-    DockToBar = true,     -- (2.0) superseded by Position
     -- Player chart position: 'chat' = one-line strip in the gap under the chat log
     -- (default), 'bar' = docked under the target bar, 'free' = ChartStartX/Y (drag).
     Position = 'chat',
@@ -85,9 +82,9 @@ M.defaults = default_settings;
 
 local settings = default_settings;   -- per-char table from the settings lib (M.set_cfg)
 
--- PERF: change counters. Label rows / colors / window size rebuild only when these move.
+-- Change counters: label rows, colours and window size rebuild only when these move.
 local ver = { cfg = 0 };
-local saved_dirty_at = nil;   -- debounce: slider drags no longer write the file every frame
+local saved_dirty_at = nil;   -- debounce: a slider drag writes the file once, 0.5 s after it stops
 
 local function save_saved()
     return slib.save('aaev');
@@ -139,8 +136,6 @@ local state = {
     last_target = nil,
 };
 
-local config_open = { true };
-
 -- Zone-lifetime melee accuracy for the player. Survives target death and log
 -- purges; only a zone change (0x00B) or /goomui aaev zonereset clears it.
 local zone_stats = { count = 0, miss = 0, crit = 0, v = 0 };
@@ -162,8 +157,7 @@ local function target_override()
     return nil;
 end
 
--- FIX: charts linger HideDelay seconds after disengage/target death instead of
--- vanishing instantly. Any new data or re-engage cancels the pending hide.
+-- Charts linger HideDelay seconds after disengage / target death; new data or a re-engage cancels the hide.
 local function set_visible(log_type)
     state.visible[log_type] = true;
     state.hide_at[log_type] = nil;
@@ -183,14 +177,6 @@ end
 ----------------------------------------------------------------------------------------------------
 -- Game state helpers
 ----------------------------------------------------------------------------------------------------
-
-local function player_id()
-    local p = GetPlayerEntity();
-    if (p ~= nil and p.ServerId ~= nil and p.ServerId > 0) then
-        return p.ServerId;
-    end
-    return nil;
-end
 
 local function player_status()
     local p = GetPlayerEntity();
@@ -212,9 +198,7 @@ local function is_pet_job()
     return data.pet_jobs[main_job()] == true;
 end
 
--- NOTE: resolved live every time; no stale pet ID after release/charm swap.
--- PERF: own + pet server ids, refreshed once per frame in M.render. Every
--- 0x028 in the zone used to pay GetPlayerEntity + GetEntity before the actor test.
+-- Own + pet server ids, refreshed once per frame in M.render (no stale pet id after release / charm).
 local ids = { pid = nil, petid = nil };
 
 local function pet_id(p)
@@ -290,7 +274,7 @@ local function get_target_log(log_type, tid, create)
         if (not create) then return nil; end
         log[tid] = {
             count = 0, max = 0, miss = 0, crit = 0, th = 0, rounds = 0, last_dmg = 0,
-            -- NOTE: round-mode state. rlist is the per-round ring buffer.
+            -- round mode: rlist is the per-round ring buffer
             max_round = 0, max_round_sw = 0, last_hits = 0, last_swings = 0, rlist = {},
             attacks = {}, ws = {}, v = 0,
         };
@@ -333,24 +317,23 @@ local function record_attacks(pkt, log_type)
     local tlog = get_target_log(log_type, tid, true);
     -- One 0x028 category-1 packet == one attack round (main + off + multi-attack).
     local round_dmg = 0;
-    -- FIX: round-mode accumulators. swings == number of actions in the packet, which
-    -- IS the multi-attack tier (1 single / 2 double / 3 triple / 4 quad / 5+ occ).
+    -- Round accumulators. swings = actions in the packet = the multi-attack tier (1-4, 5+ occasional).
     local r_swings, r_hits, r_crit, r_counter, r_ae = 0, 0, 0, 0, 0;
-    -- Main-hand swings this round. XiPackets 0x0028: melee result sub_kind
-    -- (act.animation here) 0 = main hand, 1 = off hand, 2/3 = kicks, 4 = throw.
+    -- Main-hand swings this round. XiPackets 0x0028: melee result sub_kind 0 = main hand, 1 = off hand,
+    -- 2/3 = kicks, 4 = throw.
     local r_mh = 0;
     -- LAST cell: melee damage and additional-effect damage of this round, kept apart.
     local r_melee, r_ae_hit = 0, 0;
 
-    for _, act in ipairs(tgt.actions) do
+    for _, act in ipairs(tgt.results) do
         local a_msg    = act.message;
-        local a_dmg    = act.param;
+        local a_dmg    = act.value;
         local a_result = data.attack_messages[a_msg] or data.ATTACK_HIT;
 
         -- Countered attacks carry no attack message but do carry a spike message.
         if (a_msg == 0) then
             local spike_msg = 0;
-            if (act.spike ~= nil) then spike_msg = act.spike.message; end
+            if (act.react ~= nil) then spike_msg = act.react.message; end
             a_result = data.attack_messages[spike_msg] or data.ATTACK_HIT;
             a_dmg = 0;
         end
@@ -362,7 +345,7 @@ local function record_attacks(pkt, log_type)
         end
 
         r_swings = r_swings + 1;
-        if (act.animation == 0) then r_mh = r_mh + 1; end
+        if (act.sub_kind == 0) then r_mh = r_mh + 1; end
         if (a_result == data.ATTACK_CRIT) then
             r_crit = r_crit + 1;
         elseif (a_result == data.ATTACK_COUNTER) then
@@ -390,9 +373,9 @@ local function record_attacks(pkt, log_type)
 
         local ae_result = data.AE_NONE;
         local ae_dmg = 0;
-        if (act.ae ~= nil) then
-            ae_result = data.ae_messages[act.ae.message] or data.AE_NONE;
-            ae_dmg = act.ae.param or 0;
+        if (act.proc ~= nil) then
+            ae_result = data.ae_messages[act.proc.message] or data.AE_NONE;
+            ae_dmg = act.proc.value or 0;
             -- TH proc: param is the new TH tier, not damage.
             if (ae_result == data.AE_TREASURE_HUNTER) then
                 tlog.th = ae_dmg;
@@ -441,7 +424,7 @@ local function record_attacks(pkt, log_type)
 
     -- Round entry for BarMode == 'round'.
     if (r_swings > 0) then
-        -- FIX: keep the swing count of the round that set max_round for the label.
+        -- swing count of the round that set max_round (for the label)
         if (round_dmg > (tlog.max_round or 0)) then
             tlog.max_round = round_dmg;
             tlog.max_round_sw = r_swings;
@@ -461,9 +444,9 @@ end
 
 local function record_ws(pkt, log_type, msg_map)
     local tgt = pkt.targets[1];
-    if (tgt == nil or tgt.actions[1] == nil) then return nil; end
+    if (tgt == nil or tgt.results[1] == nil) then return nil; end
     local tid = target_override() or tgt.id;
-    local act = tgt.actions[1];
+    local act = tgt.results[1];
 
     local result = msg_map[act.message];
     if (result == nil) then return nil; end
@@ -471,14 +454,14 @@ local function record_ws(pkt, log_type, msg_map)
     local tlog = get_target_log(log_type, tid, true);
     local entry = {
         name   = ws_name(pkt.param, pkt.category),
-        dmg    = act.param,
+        dmg    = act.value,
         result = result,
     };
-    if (act.ae ~= nil) then
-        local sc = data.skillchain_messages[act.ae.message];
+    if (act.proc ~= nil) then
+        local sc = data.skillchain_messages[act.proc.message];
         if (sc ~= nil) then
             entry.sc_name = sc.name;
-            entry.sc_dmg = act.ae.param;
+            entry.sc_dmg = act.proc.value;
             entry.sc_result = sc.result;
         end
     end
@@ -515,60 +498,6 @@ end
 -- Packet parsing
 ----------------------------------------------------------------------------------------------------
 
--- Self-contained 0x028 action packet parser (bit layout per known field maps).
-local function parse_action(e)
-    local raw = e.data_raw;
-    local pos = 40;
-    local max_bits = e.size * 8;
-    local overflow = false;
-
-    local function take(n)
-        if (pos + n > max_bits) then
-            overflow = true;
-            return 0;
-        end
-        local v = ashita.bits.unpack_be(raw, 0, pos, n);
-        pos = pos + n;
-        return v;
-    end
-
-    local pkt = {};
-    pkt.actor = take(32);
-    local tcount = take(6);
-    take(4);
-    pkt.category = take(4);
-    pkt.param = take(16);
-    take(16);
-    pkt.recast = take(32);
-    pkt.targets = {};
-
-    for i = 1, tcount do
-        local tgt = { id = take(32), actions = {} };
-        local acount = take(4);
-        for j = 1, acount do
-            local act = {};
-            act.reaction  = take(5);
-            act.animation = take(12);
-            act.effect    = take(7);
-            act.knockback = take(3);
-            act.param     = take(17);
-            act.message   = take(10);
-            act.flags     = take(31);
-            if (take(1) == 1) then
-                act.ae = { animation = take(10), param = take(17), message = take(10) };
-            end
-            if (take(1) == 1) then
-                act.spike = { animation = take(10), param = take(14), message = take(10) };
-            end
-            tgt.actions[j] = act;
-        end
-        pkt.targets[i] = tgt;
-    end
-
-    if (overflow) then return nil; end
-    return pkt;
-end
-
 local function handle_action(e)
     -- Cheap actor pre-check before full bit parse.
     local actor = struct.unpack('I4', e.data, 0x05 + 1);
@@ -587,8 +516,8 @@ local function handle_action(e)
 
     local pkt = parse_action(e);
     if (pkt == nil or pkt.targets[1] == nil) then return; end
-    -- FIX: raw server id. tid used to be 'ALLTARGETS' under DisplayContinuous, and
-    -- is_monster('ALLTARGETS') -> bit.band error on every pet ability/Ready/BP.
+    pkt.param = bit.band(pkt.param, 0xFFFF);   -- ws / ability / mob skill id
+    -- Raw server id, not 'ALLTARGETS' (DisplayContinuous): is_monster needs a number.
     local tid = pkt.targets[1].id;
 
     if (actor == pid and pkt.category == 1) then
@@ -655,7 +584,7 @@ local function handle_npc_update(e)
     local mask = struct.unpack('B', e.data, 0x0A + 1);
     if (bit.band(mask, 0x24) == 0) then return; end
     local npc_id = struct.unpack('I4', e.data, 0x04 + 1);
-    -- PERF: only mobs we have data for matter; skip every other death in the zone.
+    -- only mobs with data matter
     if (logs[TYPE_PLAYER][npc_id] == nil and logs[TYPE_PET][npc_id] == nil
         and npc_id ~= state.pet_enemy) then
         return;
@@ -705,9 +634,7 @@ end
 ----------------------------------------------------------------------------------------------------
 
 local function poll_state(p)
-    -- FIX: hit%/crit%/avg are per-mob, but the chart used to keep showing the last
-    -- mob you swung at until the first swing on the next one landed. Follow the
-    -- target instead, so the numbers blank the moment you switch mobs.
+    -- hit% / crit% / avg are per mob: follow the target, so the numbers switch with it.
     if (settings.ResetOnTargetChange and not settings.DisplayContinuous) then
         local ttid = current_target_id();
         if (ttid ~= nil and ttid ~= state.last_target) then
@@ -767,23 +694,7 @@ end
 -- Rendering
 ----------------------------------------------------------------------------------------------------
 
-local function cursor_screen_pos()
-    local a, b = imgui.GetCursorScreenPos();
-    if (type(a) == 'table' or type(a) == 'userdata') then
-        return a.x, a.y;
-    end
-    return a, b;
-end
-
-local function window_pos()
-    local a, b = imgui.GetWindowPos();
-    if (type(a) == 'table' or type(a) == 'userdata') then
-        return a.x, a.y;
-    end
-    return a, b;
-end
-
--- PERF: U32 colors cached per settings version (was a table + GetColorU32 per bar per frame).
+-- U32 colours cached per settings version.
 local u32_cache, u32_ver = {}, -1;
 local function col_u32(c, alpha)
     if (u32_ver ~= ver.cfg) then u32_cache, u32_ver = {}, ver.cfg; end
@@ -798,7 +709,7 @@ local function col_u32(c, alpha)
     return v;
 end
 
--- PERF: reused ImVec2 tables; the binding copies values at call time.
+-- Reused ImVec2 tables (the binding copies values at call time).
 local V1, V2, VD, VS = { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 };
 local function rect(dl, x1, y1, x2, y2, col)
     V1[1], V1[2], V2[1], V2[2] = x1, y1, x2, y2;
@@ -860,7 +771,7 @@ local function draw_bars(tlog, log_type)
         if (strip.on) then nbars = strip.n; end
     end
 
-    local cx, cy = cursor_screen_pos();
+    local cx, cy = imgui.GetCursorScreenPos();
     VD[1], VD[2] = width, height;
     imgui.Dummy(VD);
 
@@ -871,8 +782,7 @@ local function draw_bars(tlog, log_type)
     local bottom = cy + height;
     local marker_h = math.min(bar_w, height);
 
-    -- FIX: round mode. One bar per attack round; height from round damage, color
-    -- from swing count, thin cap when the round contained a crit.
+    -- Round mode: one bar per attack round; height from round damage, colour from swing count, thin cap on a crit.
     if (settings.BarMode == 'round') then
         local list = tlog.rlist or {};
         local off = math.max(0, #list - nbars);   -- newest nbars (strip shows fewer than are kept)
@@ -956,11 +866,9 @@ local function draw_bars(tlog, log_type)
     end
 end
 
--- FIX: label prefix resolver. Glyph mode = tight single-glyph prefixes; word
--- mode falls back to the *LabelPrefix settings. TH has no word prefix of its
--- own (it rides on Last), so it is handled inline.
+-- Label prefix: glyph mode = single-letter prefixes, word mode = the *LabelPrefix settings (TH is inline).
 local GLYPH_DEFAULT = {
-    -- FIX: ASCII only; Ashita font atlas lacks box/dingbat glyphs (they tofu).
+    -- ASCII only (the font atlas has no box / dingbat glyphs)
     Max = 'M', Last = 'L', Acc = 'A', Crit = 'C',
     Avg = '~', Zone = 'Z', Round = '#', TH = '+',
 };
@@ -975,9 +883,7 @@ local function lp(key)
     end
     return settings[WORD_PREFIX[key]] or (key .. ': ');
 end
--- FIX: TH is its own gold token now, always '+N', so it never inherits the
--- white label color and reads the same in word and glyph modes.
--- PERF: text/bg color tables built once per settings version, not per call.
+-- TH is its own gold '+N' token. Text / background colour tables are built once per settings version.
 local tc = { v = -1 };
 local RATE_GOOD, RATE_BAD = { 0.4, 1.0, 0.03, 1.0 }, { 0.93, 0.0, 0.0, 1.0 };
 local T_GOOD, T_BAD = theme.f4(150, 210, 140), theme.f4(230, 110, 100);
@@ -994,8 +900,8 @@ local function refresh_cols()
     tc.bg = { c[1] / 255, c[2] / 255, c[3] / 255, settings.BGAlpha / 255 };
     if (settings.ThemeColors) then
         -- Same plate as the target bar panels (Look tab > Panels: clear = none, opacity).
-        local a = (theme.panel_style == 'clear') and 0 or math.min(255, theme.PLATE[4] * theme.panel_alpha);
-        tc.bg = theme.f4(theme.PLATE[1], theme.PLATE[2], theme.PLATE[3], a);
+        local pa = (theme.panel_style == 'clear') and 0 or math.min(255, theme.PLATE[4] * theme.panel_alpha);
+        tc.bg = theme.f4(theme.PLATE[1], theme.PLATE[2], theme.PLATE[3], pa);
     end
     tc.good = settings.ThemeColors and T_GOOD or RATE_GOOD;
     tc.bad  = settings.ThemeColors and T_BAD or RATE_BAD;
@@ -1010,7 +916,7 @@ local function th_col()
     return tc.th;
 end
 
--- FIX: 12-char names instead of 5; no more 'Expia' mystery meat.
+-- WS names cut to 12 characters.
 local function clean_ws_name(name)
     name = name:gsub('Blade: ', ''):gsub('Tachi: ', ''):gsub('\'', '');
     return name:sub(1, 12);
@@ -1028,7 +934,7 @@ local function draw_ws_lines(tlog)
     end
     for i = i0, i1, step do
         local ws = tlog.ws[i];
-        -- PERF: format once per entry, not per frame.
+        -- formatted once per entry
         if (ws.line == nil) then
             local dmg = tostring(ws.dmg);
             if (ws.result == data.ATTACK_MISS) then dmg = 'MISS'; end
@@ -1051,13 +957,28 @@ local function draw_ws_lines(tlog)
 end
 
 local function rate_color(rate, count)
-    -- NOTE: quick visual read for daily use; >=95 green, <80 red.
+    -- >= 95 green, < 80 red
     if (settings.HitRateColorize and count > 0) then
         refresh_cols();
         if (rate >= 95) then return tc.good; end
         if (rate < 80) then return tc.bad; end
     end
     return label_col();
+end
+
+-- Average damage: whole rounds in round mode, else landed swings (heals excluded); nil when nothing landed.
+local function avg_dmg(tlog)
+    local sum, n = 0, 0;
+    if (settings.BarMode == 'round') then
+        for _, r in ipairs(tlog.rlist or {}) do
+            if (r.dmg > 0) then sum, n = sum + r.dmg, n + 1; end
+        end
+    else
+        for _, a in ipairs(tlog.attacks) do
+            if (a.result ~= data.ATTACK_HEAL and a.dmg > 0) then sum, n = sum + a.dmg, n + 1; end
+        end
+    end
+    return (n > 0) and math.floor(sum / n) or nil;
 end
 
 local function rate_fmt()
@@ -1070,20 +991,18 @@ local function label_items_max(tlog)
     local t = {};
     local is_round = (settings.BarMode == 'round');
     if (settings.DisplayMax) then
-        -- NOTE: in round mode Max is the biggest ROUND, matching what the bars show.
+        -- in round mode Max is the biggest round, as the bars show
         local mx = tlog.max;
         if (is_round) then mx = tlog.max_round or 0; end
-        -- FIX: show Max raw (was floored to nearest 100, made it read < Last).
         local mtxt = lp('Max') .. tostring(math.floor(mx));
-        -- FIX: Max now shows the swing count of the round that set it, like Last.
+        -- with the swing count of the round that set it, like Last
         if (is_round and (tlog.max_round_sw or 0) > 0) then
             mtxt = mtxt .. (' (%d)'):format(tlog.max_round_sw);
         end
         t[#t + 1] = { text = mtxt, col = label_col() };
     end
     if (settings.DisplayLast) then
-        -- FIX: show how many swings produced that number: (4) all landed,
-        -- (2/4) two of a quad-attack round landed.
+        -- swings behind the number: (4) all landed, (2/4) two of a quad-attack round landed
         local s = ('%s%d'):format(lp('Last'), tlog.last_dmg or 0);
         local sw = tlog.last_swings or 0;
         if (settings.LastShowHits and sw > 0) then
@@ -1095,7 +1014,7 @@ local function label_items_max(tlog)
             end
         end
         t[#t + 1] = { text = s, col = label_col() };
-        -- FIX: TH as its own gold '+N' token right after Last.
+        -- TH: gold '+N' right after Last
         if (settings.DisplayTH and (tlog.th or 0) > 0) then
             t[#t + 1] = { text = ('+%d'):format(tlog.th), col = th_col() };
         end
@@ -1120,8 +1039,7 @@ local function label_items_rate(tlog, log_type)
     t[#t + 1] = { text = fmt:format(lp('Acc'), rate),
                   col = rate_color(rate, tlog.count) };
 
-    -- FIX: zone accuracy parenthesized next to Hit, e.g. 'Hit: 98% (97%)'.
-    -- Own color kept (separate item), so it still greens/reds independently.
+    -- Zone accuracy in brackets after Hit ('Hit: 98% (97%)'), coloured on its own.
     if (settings.DisplayZoneAcc and log_type == TYPE_PLAYER) then
         local zrate = 0;
         if (zone_stats.count > 0) then
@@ -1133,27 +1051,8 @@ local function label_items_rate(tlog, log_type)
     end
 
     if (settings.DisplayAvg) then
-        local sum, n = 0, 0;
-        if (settings.BarMode == 'round') then
-            -- NOTE: round mode averages whole rounds, not individual swings.
-            for _, r in ipairs(tlog.rlist or {}) do
-                if (r.dmg > 0) then
-                    sum = sum + r.dmg;
-                    n = n + 1;
-                end
-            end
-        else
-        for _, a in ipairs(tlog.attacks) do
-            if (a.result ~= data.ATTACK_HEAL and a.dmg > 0) then
-                sum = sum + a.dmg;
-                n = n + 1;
-            end
-        end
-        end
-        if (n > 0) then
-            t[#t + 1] = { text = ('%s%d'):format(lp('Avg'), math.floor(sum / n)),
-                          col = label_col() };
-        end
+        local avg = avg_dmg(tlog);
+        if (avg ~= nil) then t[#t + 1] = { text = ('%s%d'):format(lp('Avg'), avg), col = label_col() }; end
     end
 
     if (settings.DisplayCritRate and tlog.count > 0) then
@@ -1170,14 +1069,6 @@ end
 local function pct_str(n, d)
     if (d == nil or d <= 0) then return '--'; end
     return ('%d%%'):format(math.floor(n / d * 100 + 0.5));
-end
-
-local function calc_text_size(text)
-    local a, b = imgui.CalcTextSize(text);
-    if (type(a) == 'table' or type(a) == 'userdata') then
-        return a.x, a.y;
-    end
-    return a, b;
 end
 
 local function grid_rows(tlog, log_type)
@@ -1206,17 +1097,8 @@ local function grid_rows(tlog, log_type)
         r1[#r1 + 1] = { l = 'MAX', v = tostring(math.floor(mx)), c = val };
     end
     if (settings.DisplayAvg) then
-        local sum, n = 0, 0;
-        if (is_round) then
-            for _, r in ipairs(tlog.rlist or {}) do
-                if (r.dmg > 0) then sum = sum + r.dmg; n = n + 1; end
-            end
-        else
-            for _, a in ipairs(tlog.attacks) do
-                if (a.result ~= data.ATTACK_HEAL and a.dmg > 0) then sum = sum + a.dmg; n = n + 1; end
-            end
-        end
-        r1[#r1 + 1] = { l = 'AVG', v = (n > 0) and tostring(math.floor(sum / n)) or '--', c = val };
+        local avg = avg_dmg(tlog);
+        r1[#r1 + 1] = { l = 'AVG', v = avg and tostring(avg) or '--', c = val };
     end
     if (settings.DisplayTH and (tlog.th or 0) > 0) then
         r1[#r1 + 1] = { l = 'TH', v = tostring(tlog.th), c = th_col() };
@@ -1268,9 +1150,9 @@ local GRID_GAP_MIN, GRID_PIECE_GAP = 10, 3;
 local function measure_row(cells)
     local total = 0;
     for _, c in ipairs(cells) do
-        c.wl = calc_text_size(c.l) or 0;
-        c.wv = calc_text_size(c.v) or 0;
-        c.ws = (c.s ~= nil) and (calc_text_size(c.s) or 0) or 0;
+        c.wl = imgui.CalcTextSize(c.l) or 0;
+        c.wv = imgui.CalcTextSize(c.v) or 0;
+        c.ws = (c.s ~= nil) and (imgui.CalcTextSize(c.s) or 0) or 0;
         c.w = c.wl + GRID_PIECE_GAP + c.wv + ((c.s ~= nil) and (GRID_PIECE_GAP + c.ws) or 0);
         total = total + c.w;
     end
@@ -1306,16 +1188,16 @@ local function draw_label_row(items)
 end
 
 local win_flags_base = bit.bor(
-    ImGuiWindowFlags_NoTitleBar or 1,
-    ImGuiWindowFlags_NoResize or 2,
-    ImGuiWindowFlags_NoScrollbar or 8,
-    ImGuiWindowFlags_NoScrollWithMouse or 16,
-    ImGuiWindowFlags_NoCollapse or 32,
-    ImGuiWindowFlags_NoFocusOnAppearing or 4096,
-    ImGuiWindowFlags_NoNav or 786432);
+    ImGuiWindowFlags_NoTitleBar,
+    ImGuiWindowFlags_NoResize,
+    ImGuiWindowFlags_NoScrollbar,
+    ImGuiWindowFlags_NoScrollWithMouse,
+    ImGuiWindowFlags_NoCollapse,
+    ImGuiWindowFlags_NoFocusOnAppearing,
+    ImGuiWindowFlags_NoNav);
 
 
--- FIX: constant window size; stacked layout, width from widest real row.
+-- Constant window size: stacked layout, width from the widest real row.
 local fws_cache = {};
 local fixed_window_size_calc;
 local function fixed_window_size(log_type)
@@ -1341,7 +1223,7 @@ fixed_window_size_calc = function (log_type)
     -- (AutoFit only ever shrinks below it), so size for FontScale or rows clip.
     local fs = tonumber(settings.FontScale) or 1.0;
     local spacing = 4;
-    local _, line_h = calc_text_size('Hg');
+    local _, line_h = imgui.CalcTextSize('Hg');
     line_h = (line_h or 13) * fs;
 
     local rows = 1; -- chart dummy
@@ -1385,7 +1267,7 @@ fixed_window_size_calc = function (log_type)
             content_h = content_h + line_h;
             rows = rows + 1;
             if (settings.WidthFromLabels) then
-                local w = calc_text_size(combined);
+                local w = imgui.CalcTextSize(combined);
                 content_w = math.max(content_w, (w or 0) * fs);
             end
         end
@@ -1394,7 +1276,7 @@ fixed_window_size_calc = function (log_type)
             content_h = content_h + line_h;
             rows = rows + 1;
             if (settings.WidthFromLabels) then
-                local w = calc_text_size(max_tmpl);
+                local w = imgui.CalcTextSize(max_tmpl);
                 content_w = math.max(content_w, (w or 0) * fs);
             end
         end
@@ -1402,7 +1284,7 @@ fixed_window_size_calc = function (log_type)
             content_h = content_h + line_h;
             rows = rows + 1;
             if (settings.WidthFromLabels) then
-                local w = calc_text_size(rate_tmpl);
+                local w = imgui.CalcTextSize(rate_tmpl);
                 content_w = math.max(content_w, (w or 0) * fs);
             end
         end
@@ -1413,7 +1295,7 @@ fixed_window_size_calc = function (log_type)
         content_h = content_h + (n * line_h);
         rows = rows + n;
         if (settings.WidthFromLabels) then
-            local w = calc_text_size('Wwwwwwwwwwww 99999 > Wwww 99999');
+            local w = imgui.CalcTextSize('Wwwwwwwwwwww 99999 > Wwww 99999');
             content_w = math.max(content_w, (w or 0) * fs);
         end
     end
@@ -1447,20 +1329,20 @@ local function draw_chart(log_type)
 
     local flags = win_flags_base;
     if (not state.unlocked) then
-        flags = bit.bor(flags, ImGuiWindowFlags_NoMove or 4, ImGuiWindowFlags_NoMouseInputs or 512);
+        flags = bit.bor(flags, ImGuiWindowFlags_NoMove, ImGuiWindowFlags_NoMouseInputs);
     end
     if (not settings.BGDisplay) then
-        flags = bit.bor(flags, ImGuiWindowFlags_NoBackground or 128);
+        flags = bit.bor(flags, ImGuiWindowFlags_NoBackground);
     end
 
     local docked = (log_type == TYPE_PLAYER and dock.on);
     if (docked) then
         VS[1], VS[2] = dock.x, dock.y;
-        imgui.SetNextWindowPos(VS, ImGuiCond_Always or 1);
-        flags = bit.bor(flags, ImGuiWindowFlags_NoMove or 4);
+        imgui.SetNextWindowPos(VS, ImGuiCond_Always);
+        flags = bit.bor(flags, ImGuiWindowFlags_NoMove);
         state.applied_pos[log_type] = false;   -- re-apply saved pos if undocked later
     elseif (not state.applied_pos[log_type]) then
-        imgui.SetNextWindowPos({ start_x, start_y }, ImGuiCond_Always or 1);
+        imgui.SetNextWindowPos({ start_x, start_y }, ImGuiCond_Always);
         state.applied_pos[log_type] = true;
     end
 
@@ -1468,26 +1350,25 @@ local function draw_chart(log_type)
         local fw, fh = fixed_window_size(log_type);
         if (docked) then fw = dock.win_w; end
         VS[1], VS[2] = fw, fh;
-        imgui.SetNextWindowSize(VS, ImGuiCond_Always or 1);
+        imgui.SetNextWindowSize(VS, ImGuiCond_Always);
     else
-        flags = bit.bor(flags, ImGuiWindowFlags_AlwaysAutoResize or 64);
+        flags = bit.bor(flags, ImGuiWindowFlags_AlwaysAutoResize);
     end
 
     refresh_cols();
-    imgui.PushStyleColor(ImGuiCol_WindowBg or 2, tc.bg);
-    imgui.PushStyleVar(ImGuiStyleVar_WindowPadding or 2, docked and dock.pad or tc.pad);
-    imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing or 13, tc.spacing);
+    imgui.PushStyleColor(ImGuiCol_WindowBg, tc.bg);
+    imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, docked and dock.pad or tc.pad);
+    imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, tc.spacing);
     -- Theme: rounded plate, no border (same look as the target bar panels).
     local nvars = 2;
-    if (settings.ThemeColors and ImGuiStyleVar_WindowRounding ~= nil and ImGuiStyleVar_WindowBorderSize ~= nil) then
+    if (settings.ThemeColors) then
         imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 3.0);
         imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0);
         nvars = 4;
     end
 
     if (imgui.Begin(WIN_NAME[log_type], nil, flags)) then
-        -- PERF: label rows + fit scale rebuilt only when this log, zone stats or
-        -- settings changed. Was: string.format + avg loop + CalcTextSize every frame.
+        -- Label rows + fit scale rebuilt only when this log, zone stats or settings change.
         local lc = row_cache[log_type];
         local zv = (log_type == TYPE_PLAYER) and zone_stats.v or 0;
         local cw_now = chart_width(log_type);
@@ -1495,11 +1376,11 @@ local function draw_chart(log_type)
             local g1, g2 = grid_rows(tlog, log_type);
             -- Fit: widest cell x cell count must fit the chart width.
             local scale = settings.FontScale or 1.0;
-            if (imgui.SetWindowFontScale ~= nil and settings.AutoFitLabels) then
+            if (settings.AutoFitLabels) then
                 imgui.SetWindowFontScale(1.0);
                 for _, row in ipairs({ g1, g2 }) do
                     local need = 0;
-                    for _, c in ipairs(row) do need = need + (calc_text_size(cell_text(c)) or 0); end
+                    for _, c in ipairs(row) do need = need + (imgui.CalcTextSize(cell_text(c)) or 0); end
                     local gaps = math.max(0, #row - 1) * GRID_GAP_MIN;
                     if (need > 0 and cw_now > gaps and need * scale + gaps > cw_now) then
                         scale = math.max(settings.MinFontScale or 0.55, (cw_now - gaps) / need);
@@ -1507,7 +1388,7 @@ local function draw_chart(log_type)
                 end
             end
             -- Real widths at the scale actually drawn.
-            if (imgui.SetWindowFontScale ~= nil) then imgui.SetWindowFontScale(scale); end
+            imgui.SetWindowFontScale(scale);
             measure_row(g1);
             measure_row(g2);
             lc.top, lc.bot, lc.scale, lc.grid = g1, g2, scale, true;
@@ -1516,8 +1397,7 @@ local function draw_chart(log_type)
             lc.grid = false;
             local top_row = label_items_max(tlog);
             local bot_row = label_items_rate(tlog, log_type);
-            -- FIX: SingleLineLabels folds Max/TH onto the stat row so the window is
-            -- one text line tall instead of two.
+            -- SingleLineLabels folds Max / TH onto the stat row (one text line).
             if (settings.SingleLineLabels) then
                 for i = #top_row, 1, -1 do
                     table.insert(bot_row, 1, top_row[i]);
@@ -1525,11 +1405,9 @@ local function draw_chart(log_type)
                 top_row = {};
             end
 
-            -- FIX: window width follows ChartWidth, not the label text. If the label
-            -- row would overflow, shrink the font to fit instead of widening the window.
+            -- Width follows ChartWidth: a row that would overflow shrinks the font.
             local scale = settings.FontScale or 1.0;
-            if (imgui.SetWindowFontScale ~= nil
-                and settings.AutoFitLabels and not settings.WidthFromLabels) then
+            if (settings.AutoFitLabels and not settings.WidthFromLabels) then
                 -- Measure at 1.0.
                 imgui.SetWindowFontScale(1.0);
                 local widest = 0;
@@ -1537,7 +1415,7 @@ local function draw_chart(log_type)
                     if (#row > 0) then
                         local parts = {};
                         for i, it in ipairs(row) do parts[i] = it.text; end
-                        local w = calc_text_size(table.concat(parts, ' ')) or 0;
+                        local w = imgui.CalcTextSize(table.concat(parts, ' ')) or 0;
                         if (w > widest) then widest = w; end
                     end
                 end
@@ -1550,10 +1428,7 @@ local function draw_chart(log_type)
             lc.tlog, lc.v, lc.zv, lc.cv = tlog, tlog.v, zv, ver.cfg;
         end
         local top_row, bot_row = lc.top, lc.bot;
-        -- SetWindowFontScale is not exposed in every Ashita imgui build; guard it.
-        if (imgui.SetWindowFontScale ~= nil) then
-            imgui.SetWindowFontScale(lc.scale);
-        end
+        imgui.SetWindowFontScale(lc.scale);
 
         imgui.BeginGroup();
 
@@ -1587,7 +1462,7 @@ local function draw_chart(log_type)
         imgui.EndGroup();
 
         if (state.unlocked) then
-            local wx, wy = window_pos();
+            local wx, wy = imgui.GetWindowPos();
             state['pos_' .. log_type] = { math.floor(wx), math.floor(wy) };
         end
     end
@@ -1640,26 +1515,22 @@ local function draw_strip(log_type)
         tlog = idle_log;
     end
 
-    local flags = bit.bor(win_flags_base, ImGuiWindowFlags_NoMove or 4, ImGuiWindowFlags_NoMouseInputs or 512);
-    if (not settings.BGDisplay) then flags = bit.bor(flags, ImGuiWindowFlags_NoBackground or 128); end
+    local flags = bit.bor(win_flags_base, ImGuiWindowFlags_NoMove, ImGuiWindowFlags_NoMouseInputs);
+    if (not settings.BGDisplay) then flags = bit.bor(flags, ImGuiWindowFlags_NoBackground); end
     VS[1], VS[2] = strip.x, strip.y;
-    imgui.SetNextWindowPos(VS, ImGuiCond_Always or 1);
+    imgui.SetNextWindowPos(VS, ImGuiCond_Always);
     VS[1], VS[2] = strip.w, strip.h;
-    imgui.SetNextWindowSize(VS, ImGuiCond_Always or 1);
+    imgui.SetNextWindowSize(VS, ImGuiCond_Always);
 
     refresh_cols();
-    imgui.PushStyleColor(ImGuiCol_WindowBg or 2, tc.bg);
-    imgui.PushStyleVar(ImGuiStyleVar_WindowPadding or 2, strip.pad);
-    imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing or 13, strip.sp);
-    local nvars = 2;
-    if (ImGuiStyleVar_WindowRounding ~= nil and ImGuiStyleVar_WindowBorderSize ~= nil) then
-        imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 2.0);
-        imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0);
-        nvars = 4;
-    end
+    imgui.PushStyleColor(ImGuiCol_WindowBg, tc.bg);
+    imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, strip.pad);
+    imgui.PushStyleVar(ImGuiStyleVar_ItemSpacing, strip.sp);
+    imgui.PushStyleVar(ImGuiStyleVar_WindowRounding, 2.0);
+    imgui.PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0);
     VD[1], VD[2] = 1, 1;
-    imgui.PushStyleVar(ImGuiStyleVar_WindowMinSize or 5, VD);   -- imgui's 32px minimum would not fit the gap
-    nvars = nvars + 1;
+    imgui.PushStyleVar(ImGuiStyleVar_WindowMinSize, VD);   -- imgui's 32px minimum would not fit the gap
+    local nvars = 5;
 
     if (imgui.Begin('aaev_strip', nil, flags)) then
         local lc = strip_cache;
@@ -1668,22 +1539,19 @@ local function draw_strip(log_type)
             local cells = strip_cells(tlog, log_type);
             local avail = strip.w - strip.bw - 2 * strip.pad[1] - 10;
             local scale = settings.FontScale or 1.0;
-            local has_scale = imgui.SetWindowFontScale ~= nil;
-            if (has_scale) then
-                -- Shrink a little for width (not below 0.85: stays readable); then drop cells.
-                imgui.SetWindowFontScale(1.0);
-                local need = 0;
-                for _, c in ipairs(cells) do
-                    local t = (c.l == 'WS') and 'WS Wwwwwwwwwwww 99999' or cell_text(c);
-                    need = need + (calc_text_size(t) or 0);
-                end
-                local gaps = math.max(0, #cells - 1) * STRIP_GAP;
-                if (need > 0 and avail > gaps and need * scale + gaps > avail) then
-                    scale = math.max(0.85, (avail - gaps) / need);
-                end
-                imgui.SetWindowFontScale(scale);
+            -- Shrink a little for width (not below 0.85: stays readable); then drop cells.
+            imgui.SetWindowFontScale(1.0);
+            local need = 0;
+            for _, c in ipairs(cells) do
+                local t = (c.l == 'WS') and 'WS Wwwwwwwwwwww 99999' or cell_text(c);
+                need = need + (imgui.CalcTextSize(t) or 0);
             end
-            local _, lh = calc_text_size('Hg');
+            local gaps = math.max(0, #cells - 1) * STRIP_GAP;
+            if (need > 0 and avail > gaps and need * scale + gaps > avail) then
+                scale = math.max(0.85, (avail - gaps) / need);
+            end
+            imgui.SetWindowFontScale(scale);
+            local _, lh = imgui.CalcTextSize('Hg');
             lc.text_y = math.max(0, math.floor((strip.h - (lh or 0)) / 2));
             measure_row(cells);
             -- Still too wide: drop the least important cells first.
@@ -1699,12 +1567,12 @@ local function draw_strip(log_type)
             lc.cells, lc.scale, lc.avail = cells, scale, avail;
             lc.tlog, lc.v, lc.zv, lc.cv, lc.w, lc.h = tlog, tlog.v, zv, ver.cfg, strip.w, strip.h;
         end
-        if (imgui.SetWindowFontScale ~= nil) then imgui.SetWindowFontScale(lc.scale); end
+        imgui.SetWindowFontScale(lc.scale);
 
         -- bars (vertically centred), then the cells; SameLine offsets are from the window's left edge
         imgui.SetCursorPosY(math.floor((strip.h - strip.bh) / 2));
         draw_bars(tlog, log_type);
-        local cells, n = lc.cells, #lc.cells;
+        local cells = lc.cells;
         local x = strip.pad[1] + strip.bw + 10;
         local gap = STRIP_GAP;
         for _, c in ipairs(cells) do
@@ -1751,7 +1619,7 @@ function M.render()
         local x = tonumber(settings.StripX) or -1;
         if (x < 0) then x = math.floor(sw * 0.0075 + 0.5); end
         -- Height grows to fit the font (imgui text is not shrunk for height).
-        local _, lh = calc_text_size('Hg');
+        local _, lh = imgui.CalcTextSize('Hg');
         h = math.max(h, math.ceil((lh or 13) * (settings.FontScale or 1.0)) + 2 * strip.pad[2]);
         strip.n = math.max(5, math.min(100, math.floor(tonumber(settings.StripRounds) or 25)));
         local px = math.max(2, math.min(20, math.floor(tonumber(settings.StripBarPx) or 5)));
@@ -1801,7 +1669,7 @@ local function make_demo(log_type)
     tlog.rlist = {};
     tlog.max_round = 0;
     tlog.max_round_sw = 0;
-    for i = 1, chart_bars(log_type) do
+    for _ = 1, chart_bars(log_type) do
         local sw = 1;
         local roll = math.random(100);
         if (roll > 92) then sw = 4;
@@ -1835,7 +1703,7 @@ local function make_demo(log_type)
         data.ATTACK_BLOCK, data.ATTACK_MISS, data.ATTACK_HIT_ZERO, data.ATTACK_HIT,
         data.ATTACK_CRIT, data.ATTACK_HEAL,
     };
-    for i = 1, chart_bars(log_type) do
+    for _ = 1, chart_bars(log_type) do
         local r = results[math.random(#results)];
         local dmg = 0;
         if (r == data.ATTACK_HIT or r == data.ATTACK_CRIT or r == data.ATTACK_HEAL) then
@@ -1886,9 +1754,6 @@ end
 -- Config window (mirrors the targetbar settings UI)
 ----------------------------------------------------------------------------------------------------
 
-local cfg_flags = bit.bor(ImGuiWindowFlags_NoCollapse or 32,
-                          ImGuiWindowFlags_AlwaysAutoResize or 64);
-
 local function set_setting(key, value)
     settings[key] = value;
     ver.cfg = ver.cfg + 1;
@@ -1915,13 +1780,8 @@ local function cfg_check_pair(la, ka, lb, kb, col_w)
     end
 end
 
--- InputInt used to write + clamp on every keystroke, so typing '250' went
--- 2 -> clamped to lo -> the field fought back. Buffer the raw value in an int_buf
--- table keyed by widget id; commit + clamp + save only when the field loses
--- focus (IsItemDeactivatedAfterEdit). Fall back to commit-on-change on bindings
--- that lack the query.
+-- InputInt buffered per widget id: commit + clamp + save when the field loses focus (no clamping mid-typing).
 local int_buf = {};
-local ig_dae  = imgui.IsItemDeactivatedAfterEdit;
 
 local function cfg_int(label, key, lo, hi)
     local id = label .. '#' .. key;
@@ -1933,8 +1793,7 @@ local function cfg_int(label, key, lo, hi)
     local changed = imgui.InputInt(label, buf.v);
     if (changed) then buf.editing = true; end
 
-    local done = ig_dae and ig_dae() or (not ig_dae and changed);
-    if (not done) then return false; end
+    if (not imgui.IsItemDeactivatedAfterEdit()) then return false; end
 
     buf.editing = false;
     local n = math.floor(tonumber(buf.v[1]) or cur);
@@ -1962,57 +1821,10 @@ local function cfg_float(label, key, lo, hi)
     return false;
 end
 
-local function cfg_note(text)
-    if (imgui.TextDisabled ~= nil) then
-        imgui.TextDisabled(text);
-    else
-        imgui.TextColored({ 0.6, 0.6, 0.6, 1.0 }, text);
-    end
-end
+local function cfg_note(text) imgui.TextDisabled(text); end
 
--- CollapsingHeader is not guaranteed in every Ashita imgui build; fall back to a plain heading.
-local function cfg_section(label)
-    if (imgui.CollapsingHeader ~= nil) then
-        local ok, open = pcall(imgui.CollapsingHeader, label);
-        if (ok) then return open; end
-    end
-    imgui.Separator();
-    imgui.Text(label);
-    return true;
-end
-
--- Tab wrappers with feature detection. Older Ashita imgui bindings only ship
--- Checkbox/InputInt/Text; TabBar arrived later. When missing we fall back to
--- collapsing headers so the window still works, just as one long scroll.
-local HAS_TABS = imgui.BeginTabBar ~= nil
-             and imgui.BeginTabItem ~= nil
-             and imgui.EndTabItem ~= nil
-             and imgui.EndTabBar ~= nil;
-
-local function tabs_begin(id)
-    if (HAS_TABS) then
-        local ok, opened = pcall(imgui.BeginTabBar, id);
-        return ok and opened;
-    end
-    return false;
-end
-local function tabs_end()  if (HAS_TABS) then pcall(imgui.EndTabBar);  end end
-local function tab_begin(label)
-    if (HAS_TABS) then
-        local ok, opened = pcall(imgui.BeginTabItem, label);
-        return ok and opened;
-    end
-    return cfg_section(label);   -- fallback: headers, always drawn
-end
-local function tab_end() if (HAS_TABS) then pcall(imgui.EndTabItem); end end
-
+-- '(?)' with a hover tooltip
 local function help_marker(text)
-    -- Small '(?)' with a hover tooltip. Not strictly needed but keeps the row
-    -- from carrying a 60-char '(what this does)' phrase.
-    if (imgui.TextDisabled == nil or imgui.IsItemHovered == nil
-        or imgui.BeginTooltip == nil or imgui.EndTooltip == nil) then
-        return;
-    end
     imgui.SameLine();
     imgui.TextDisabled('(?)');
     if (imgui.IsItemHovered()) then
@@ -2027,9 +1839,6 @@ local function apply_chart_pos()
     state.applied_pos[TYPE_PET] = false;
     save_positions();
 end
-
--- Tab bodies. Split out so both the TabBar path and the CollapsingHeader
--- fallback (older imgui bindings) can call the same code.
 
 local function tab_display()
     local full = { settings.DisplayMode ~= 'simple' };
@@ -2141,8 +1950,7 @@ local function tab_layout()
 end
 
 local function tab_stats()
-    -- Row format: two-column checkbox grid. Each column is ~220px so the labels
-    -- do not butt up against one another when the left is a short word.
+    -- two-column checkbox grid, ~220 px per column
     imgui.Text('Which numbers to show');
     cfg_check_pair('Max damage',              'DisplayMax',
                    'Average damage',          'DisplayAvg',      220);
@@ -2159,9 +1967,7 @@ local function tab_stats()
 
     imgui.Separator();
     imgui.Text('Format');
-    -- 'GlyphLabels' internally, but 'glyph' is inaccurate -- ASCII M/L/A/C are
-    -- not glyphs, they are single-letter prefixes. Label + tooltip make the
-    -- meaning obvious without renaming the storage key (would break saves).
+    -- stored as GlyphLabels
     cfg_check('Short prefixes  ("M 999" instead of "Max: 999")', 'GlyphLabels');
     help_marker(
         'Off: "Max: 999   Last: 2547   Acc: 92%   Crit: 8%"\n'
@@ -2220,27 +2026,16 @@ local function tab_footer()
     cfg_note('Changes save per character as you make them.');
 end
 
+local TABS = { { 'Display', tab_display }, { 'Layout', tab_layout }, { 'Stats', tab_stats },
+               { 'Weaponskills', tab_weaponskills }, { 'Effects', tab_effects }, { 'Pet', tab_pet } };
 function M.draw_config_body()
-    do
-        if (tabs_begin('##aaev_tabs')) then
-            if (tab_begin('Display'))       then tab_display();       tab_end(); end
-            if (tab_begin('Layout'))        then tab_layout();        tab_end(); end
-            if (tab_begin('Stats'))         then tab_stats();         tab_end(); end
-            if (tab_begin('Weaponskills'))  then tab_weaponskills();  tab_end(); end
-            if (tab_begin('Effects'))       then tab_effects();       tab_end(); end
-            if (tab_begin('Pet'))           then tab_pet();           tab_end(); end
-            tabs_end();
-        else
-            -- Fallback: no TabBar in this imgui build; drop back to headers.
-            if (cfg_section('Display'))      then tab_display();      end
-            if (cfg_section('Layout'))       then tab_layout();       end
-            if (cfg_section('Stats'))        then tab_stats();        end
-            if (cfg_section('Weaponskills')) then tab_weaponskills(); end
-            if (cfg_section('Effects'))      then tab_effects();      end
-            if (cfg_section('Pet'))          then tab_pet();          end
+    if (imgui.BeginTabBar('##aaev_tabs')) then
+        for _, t in ipairs(TABS) do
+            if (imgui.BeginTabItem(t[1])) then t[2](); imgui.EndTabItem(); end
         end
-        tab_footer();
+        imgui.EndTabBar();
     end
+    tab_footer();
 end
 
 ----------------------------------------------------------------------------------------------------
@@ -2278,7 +2073,7 @@ function M.command(args)
     local cmd = '';
     if (args[2] ~= nil) then cmd = args[2]:lower(); end
 
-    -- NOTE: bare /goomui aaev toggles visibility for daily use.
+    -- bare /goomui aaev toggles visibility
     if (cmd == '') then
         if (state.forced_hidden) then
             cmd = 'show';
@@ -2323,7 +2118,6 @@ function M.command(args)
         if (pp ~= nil) then
             settings.PetChartStartX, settings.PetChartStartY = pp[1], pp[2];
         end
-        -- FIX: positions auto-persist to aaev_positions.lua; no hand-editing.
         if (save_positions()) then
             msg('Charts locked; positions saved.');
         else

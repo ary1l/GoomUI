@@ -62,6 +62,11 @@ local COL = {
 };
 local PANEL_BG = theme.u32(14, 12, 6, 150);
 local ACCENT   = theme.u32(200, 165, 70);
+-- the summary chip's outlined text (same hues as COL)
+local CHIP_COL = {
+    title = theme.u32(217, 191, 115), item = theme.u32(255, 255, 255), me = theme.u32(140, 255, 140),
+    timer = theme.u32(190, 190, 200), urgent = theme.u32(255, 115, 89), dim = theme.u32(160, 160, 170),
+};
 
 -- Clickable (buttons) and draggable anywhere off the buttons; position saved on release.
 local FLAGS = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize,
@@ -178,10 +183,10 @@ end
 ------------------------------------------------------------
 local function demo_rows()
     local t = now();
-    local function H(id, seen, lots, pass, n)
+    local function H(id, seen, lots, passes, n)
         local h = new_hist('demo' .. id .. ':' .. (n or 1), id, seen);
         for i, l in ipairs(lots) do h.lots[i] = { name = l[1], lot = l[2] }; end
-        for i, p in ipairs(pass) do h.pass[100 + i] = p; end
+        for i, p in ipairs(passes) do h.pass[100 + i] = p; end
         return h;
     end
     -- Member1 = you (same placeholder names as the party list setup)
@@ -273,9 +278,11 @@ local function draw_row(r, party, myName, myZone)
         inline(COL.pass, 'pass: ' .. table.concat(ps, ', '), first); first = false;
     end
     if (party ~= nil and not demo) then
+        -- members in this zone still to act; trusts (entity index 1792+, XiPackets 0x00E: spawnables) never lot
         local w = {};
         for i = 0, 17 do
-            if (party:GetMemberIsActive(i) ~= 0 and party:GetMemberZone(i) == myZone) then
+            if (party:GetMemberIsActive(i) ~= 0 and party:GetMemberZone(i) == myZone
+                and party:GetMemberTargetIndex(i) < 1792) then
                 local nm = party:GetMemberName(i);
                 if (nm ~= nil and nm ~= '' and not acted[nm]) then w[#w + 1] = nm; end
             end
@@ -322,7 +329,10 @@ local CHIP_FLAGS = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_Alway
     ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoMove);
 local chipW, chipH = 150, 16; -- its size last frame (placement uses it)
 local CHIP_PAD = { 6, 1 };     -- one text line high: fits the low-fi gap under an alliance (one empty 12 px row + 6)
+local CHIP_GAP = 10;           -- px between its pieces
 local chip_open = { true };
+local chip_t, chip_c, chip_n = {}, {}, 0;
+local function piece(t, c) chip_n = chip_n + 1; chip_t[chip_n], chip_c[chip_n] = t, c; end
 
 local function dock()
     local party = package.loaded['modules/party'];
@@ -354,11 +364,11 @@ local function draw_chip(n)
     if (right ~= nil) then
         x = math.floor(right - chipW);
         if (above == nil) then
-            y = math.floor(top - chipH - 2);
-        elseif ((top - above) >= chipH + 2) then
+            y = math.floor(top - chipH - 4);
+        elseif ((top - above) >= chipH + 4) then
             y = math.floor(above + ((top - above) - chipH) / 2);
         else
-            y = math.floor(stack - chipH - 2);
+            y = math.floor(stack - chipH - 4);
         end
     end
     imgui.SetNextWindowPos({ x, y }, ImGuiCond_Always);
@@ -375,14 +385,26 @@ local function draw_chip(n)
         if (newest ~= nil and now() - newest < 4) then -- a new drop: outlined for a few seconds
             dl:AddRect({ wx, wy }, { wx + ww, wy + wh }, ACCENT, 4.0, 0, 1.5);
         end
-        imgui.TextColored(COL.title, (demo and 'Pool (demo) ' or 'Pool ') .. n);
-        if (act > 0) then imgui.SameLine(0, 8); imgui.TextColored(COL.me, act .. ' to lot'); end
+        -- Pool  5 items  4 to lot  0:50 left  [+]   (outlined like the party list text)
+        chip_n = 0;
+        piece(demo and 'Pool (demo)' or 'Pool', CHIP_COL.title);
+        piece((n == 1) and '1 item' or (n .. ' items'), CHIP_COL.item);
+        if (act > 0) then piece(act .. ' to lot', CHIP_COL.me); end
         if (soon ~= nil) then
-            imgui.SameLine(0, 8);
-            imgui.TextColored(soon < 60 and COL.urgent or COL.timer, ('%d:%02d'):fmt(math.floor(soon / 60), math.floor(soon % 60)));
+            piece(('%d:%02d left'):fmt(math.floor(soon / 60), math.floor(soon % 60)),
+                (soon < 60) and CHIP_COL.urgent or CHIP_COL.timer);
         end
-        imgui.SameLine(0, 8);
-        imgui.TextColored(COL.wait, cfg.pool_open and '-' or '+');
+        piece(cfg.pool_open and '[-]' or '[+]', CHIP_COL.dim);
+        local tw = 0;
+        for i = 1, chip_n do tw = tw + imgui.CalcTextSize(chip_t[i]) + ((i > 1) and CHIP_GAP or 0); end
+        local _, th = imgui.CalcTextSize('Hg');
+        local tx, ty = imgui.GetCursorScreenPos();
+        imgui.Dummy({ tw + 2, th });
+        tx = tx + 1;
+        for i = 1, chip_n do
+            theme.text_outlined(dl, tx, ty, chip_c[i], chip_t[i]);
+            tx = tx + imgui.CalcTextSize(chip_t[i]) + CHIP_GAP;
+        end
         if (imgui.IsWindowHovered()) then
             imgui.SetTooltip(cfg.pool_open and 'Click: hide the pool window' or 'Click: show the pool window');
             if (imgui.IsMouseClicked(0)) then
@@ -446,12 +468,12 @@ function M.command(arg)
         pcall(settings.save, 'bar');
         return 'Treasure pool window ' .. (cfg.pool_open and 'shown.' or 'hidden (summary only).');
     elseif (arg == 'dock') then
-        cfg.pool_dock = not (cfg.pool_dock ~= false);
+        cfg.pool_dock = (cfg.pool_dock == false);
         pcall(settings.save, 'bar');
         return cfg.pool_dock and 'Treasure pool: summary by the party list (click it for the window).'
             or 'Treasure pool: window only.';
     end
-    cfg.show_pool = not (cfg.show_pool ~= false);
+    cfg.show_pool = (cfg.show_pool == false);
     pcall(settings.save, 'bar');
     return 'Treasure pool window ' .. (cfg.show_pool and 'on.' or 'off.');
 end

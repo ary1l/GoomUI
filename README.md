@@ -100,6 +100,9 @@ modules/party.lua     party / alliance list (D3D sprite + gdifonts)
 modules/bar.lua       target / cast / JA / menu bars
 modules/ring.lua      ground rings, target cursor, GEO bubbles
 modules/aaev.lua      auto-attack chart       (modules/aaev_data.lua: message / skill tables)
+modules/pool.lua      treasure pool summary and window
+modules/action.lua    0x028 action packet parser (rings, AAEV, mob debuffs)
+modules/ui.lua        hidden-UI / cutscene / menu state, mouse position
 modules/gui.lua       settings window
 modules/debuffs.lua   debuff ids for the party list
 modules/mobdebuff.lua debuffs on the targeted mob (modules/mobdebuff_data.lua: durations)
@@ -126,4 +129,4 @@ docs/                 these pages
   Jyouya (customtarget). AAEV: darkewaffle (Windower).
 - atom0s: XiPackets, Ashita SDK, recast / equipmon / crosshair patterns. Thorny: gdifonts, LuAshitacast lookups.
 - `modules/debuffs.lua` from XIUI `bufftable.lua`; `modules/mobdebuff.lua` and `mobdebuff_data.lua` from XIUI
-  `debuffhandler.lua` / `debuff_retail.lua` (itself from mousseng's XITools). XIUI is GPL-3.0.
+  `debuffhandler.lua` / `debuff_retail.lua` (itself from mousseng's XITools). XIUI is GPL-3.0: `LICENSE-XIUI`.

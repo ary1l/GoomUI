@@ -18,66 +18,19 @@ local rm = AshitaCore:GetResourceManager()
 
 local pMenuHelp = ashita.memory.find(0, 0, '5350E8????????5F885D??5E5D5BC3A1????????85C0????538BCDE8', 16, 0)
 
-local mem_read_uint32      = ashita.memory.read_uint32
-local mem_read_int32       = ashita.memory.read_int32
-local mem_read_string      = ashita.memory.read_string
-local igSetNextWindowPos   = imgui.SetNextWindowPos
-local igSetNextWindowSize  = imgui.SetNextWindowSize
-local igCalcTextSize       = imgui.CalcTextSize
-local igBegin              = imgui.Begin
-local igEnd                = imgui.End
-local igGetWindowDrawList  = imgui.GetWindowDrawList
-local igGetWindowPos       = imgui.GetWindowPos
-local igGetWindowSize      = imgui.GetWindowSize
-local igSetCursorPosX      = imgui.SetCursorPosX
-local igGetCursorPosX      = imgui.GetCursorPosX
-local igSetCursorPosY      = imgui.SetCursorPosY
-local igGetCursorPosY      = imgui.GetCursorPosY
-local igTextColored        = imgui.TextColored
-local igSameLine           = imgui.SameLine
-local igGetCursorScreenPos = imgui.GetCursorScreenPos
-local igDummy              = imgui.Dummy
-local igGetColorU32        = imgui.GetColorU32
-local igIsMouseReleased    = imgui.IsMouseReleased
-
-local str_find    = string.find
-local str_sub     = string.sub
-local str_lower   = string.lower
-local print       = print
-local igCond_Always       = ImGuiCond_Always
-
-local bit_band   = bit.band
-local bit_bor    = bit.bor
-local str_format = string.format
-local math_sqrt  = math.sqrt
-local math_max   = math.max
-local math_min   = math.min
-local math_floor = math.floor
-local math_ceil  = math.ceil
-local math_abs   = math.abs
-local os_clock   = os.clock
-local pcall      = pcall
-local type       = type
-local unpack     = struct.unpack
-local tostring   = tostring
-local table_clear= table.clear
-
 ------------------------------------------------------------
 -- WINDOW FLAGS
 ------------------------------------------------------------
-local FLAGS_LOCKED = bit_bor(
+local FLAGS_LOCKED = bit.bor(
     ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize,
     ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav,
     ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoMove,
     ImGuiWindowFlags_NoMouseInputs)
 
-local FLAGS_MOVABLE = bit_bor(
+local FLAGS_MOVABLE = bit.bor(
     ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize,
     ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav,
     ImGuiWindowFlags_NoBackground)
-
-local FLAGS_SETTINGS = bit_bor(
-    ImGuiWindowFlags_NoCollapse, ImGuiWindowFlags_AlwaysAutoResize)
 
 ------------------------------------------------------------
 -- CONFIG & CONSTANTS
@@ -124,12 +77,9 @@ local CAST_RESTART_DROP = 0.05
 local CAST_RISE_GRACE   = 0.5
 local CAST_TIME_DIVISOR = 4.0
 
-local function read_casttime(r) return r.CastTime end
-
 local function resource_cast_seconds(r)
-    if not r then return nil end
-    local ok, ct = pcall(read_casttime, r)
-    if not ok or type(ct) ~= 'number' or ct <= 0 then return nil end
+    local ct = r and r.CastTime
+    if not ct or ct <= 0 then return nil end
     return ct / CAST_TIME_DIVISOR
 end
 
@@ -216,7 +166,7 @@ local EXCLUDED_KEYWORDS = {
 
 local function is_excluded_text(lower)
     for i = 1, #EXCLUDED_KEYWORDS do
-        if str_find(lower, EXCLUDED_KEYWORDS[i], 1, true) then return true end
+        if string.find(lower, EXCLUDED_KEYWORDS[i], 1, true) then return true end
     end
     return false
 end
@@ -271,11 +221,9 @@ local sub_target_expires     = 0
 
 local last_menu_update = 0
 
--- Mounts expose no live recast in client memory (snapshot static, recast list
--- empty, /recast shows nothing). The recast is summon-anchored at 60s, so it is
--- timed client-side: cd_until is armed on the Mount status (buff 252) 0->1 edge.
--- id starts at -1 ('not yet sampled') so reloading while already mounted records
--- the baseline instead of firing a false summon and a phantom 1:00.
+-- Mount recast: 1 minute from the summon (bg-wiki Category:Mounts), timed client-side from the Mount status
+-- (buff 252) 0->1 edge. id starts at -1 ('not yet sampled') so a reload while mounted records the baseline
+-- instead of a phantom 1:00.
 local mount = { id = -1, cd_until = 0, chk = 0, recast = 60.0, interval = 0.20 }
 
 local main_target_cache   = {}
@@ -305,9 +253,7 @@ local v_p1   = {0, 0}
 local v_p2   = {0, 0}
 local p_open = {true}
 
--- One table = one upvalue for all cached manager interfaces (player/party/
--- recast/inv were fetched per call before -> per-frame/per-hover userdata churn).
--- Refreshed on load and zone-in like the old cached_cb/targ/entity trio.
+-- Cached manager interfaces, refreshed on load and zone-in.
 local mgr = {
     player = nil, party = nil, recast = nil, inv = nil,
     cb = nil, targ = nil, entity = nil,
@@ -328,10 +274,10 @@ local rcache = { bw = 400, bh = 14, win_w = 0, sub_bh = 0, h_main = 32, h_sub = 
 -- The GUI writes bar_width/bar_height live while a value is being typed; draw
 -- with clamped copies so a half-typed '1' or '-' never reaches Dummy/AddRect.
 local function update_rcache()
-    rcache.bw     = math_max(100, math_min(800, tonumber(cfg.bar_width)  or 400))
-    rcache.bh     = math_max(6,   math_min(48,  tonumber(cfg.bar_height) or 14))
+    rcache.bw     = math.max(100, math.min(800, tonumber(cfg.bar_width)  or 400))
+    rcache.bh     = math.max(6,   math.min(48,  tonumber(cfg.bar_height) or 14))
     rcache.win_w  = rcache.bw + 16
-    rcache.sub_bh = math_max(2, math_floor(rcache.bh * 0.5))
+    rcache.sub_bh = math.max(2, math.floor(rcache.bh * 0.5))
 end
 
 ------------------------------------------------------------
@@ -341,9 +287,8 @@ end
 -- you cast or swing is (base range + your hitbox + theirs). A big NM can be
 -- inside casting range while the raw number reads well past 22.
 --
--- Kept in one table so this costs a single upvalue (see the note on mgr).
--- With two average PCs (~1.0 hitbox each) the edges land on 22 / 30, which is
--- exactly where the old hardcoded cuts were.
+-- With two average PCs (~1.0 hitbox each) the edges land on 22 / 30, the fixed
+-- cuts used when dynamic_range is off.
 local RANGE = {
     base    = 20.0,   -- standard magic range
     mid_pad =  8.0,   -- width of the amber 'close, but out of range' band
@@ -351,24 +296,11 @@ local RANGE = {
     down    = -7.5,   -- ...or this far below (thresholds taken from DistancePlus)
 }
 
-local pos = { self_idx = 0, self_hb = 0.0, probed = false, hb_ok = false, y_ok = false }
+local pos = { self_idx = 0, self_hb = 0.0 }
 
--- ModelSize is usually -1; ModelHitboxSize is the one the server actually sends
--- (packets 0x0D/0x0E/0x37, stored as byte * 0.1). Probed once so an older Ashita
--- build without the binding degrades to the fixed thresholds instead of erroring.
-local function probe_entity_api(entity)
-    if pos.probed or not entity then return end
-    pos.probed = true
-    local ok, v = pcall(function() return type(entity.GetModelHitboxSize) == 'function' end)
-    pos.hb_ok = (ok and v) or false
-    ok, v = pcall(function() return type(entity.GetLocalPositionY) == 'function' end)
-    pos.y_ok = (ok and v) or false
-end
-
+-- ModelSize is usually -1; ModelHitboxSize is the size the server sends.
 local function hitbox_of(entity, idx)
     if not entity or not idx or idx == 0 then return 0.0 end
-    probe_entity_api(entity)
-    if not pos.hb_ok then return 0.0 end
     local h = entity:GetModelHitboxSize(idx)
     if type(h) ~= 'number' or h <= 0.0 or h > 20.0 then return 0.0 end
     return h
@@ -378,7 +310,6 @@ end
 -- UTILITY FUNCTIONS
 ------------------------------------------------------------
 local function is_game_active()
-    if not mm then return false end
     local pl = mgr.player
     if not pl then                                  -- addon loaded at title screen
         pl = mm:GetPlayer()
@@ -418,23 +349,23 @@ end
 -- Server said the cast / item finished (ok) or was interrupted: freeze the bar
 -- (full when ok) and keep it cfg.cast_linger seconds, so a fast cast is seen.
 local function mark_done(ok)
-    cast_state.done_at   = os_clock()
+    cast_state.done_at   = os.clock()
     cast_state.done_ok   = ok
-    cast_state.done_frac = ok and 1.0 or math_max(0.05, cast_state.render_frac)
+    cast_state.done_frac = ok and 1.0 or math.max(0.05, cast_state.render_frac)
 end
 
 local function GetMenuHelpText()
     if pMenuHelp == 0 then return '' end
-    local offset = mem_read_uint32(pMenuHelp)
+    local offset = ashita.memory.read_uint32(pMenuHelp)
     if offset == 0 then return '' end
-    offset = mem_read_uint32(offset)
+    offset = ashita.memory.read_uint32(offset)
     if offset == 0 then return '' end
-    offset = mem_read_uint32(offset + 0xEC)
+    offset = ashita.memory.read_uint32(offset + 0xEC)
     if offset ~= 0 then
-        local str = mem_read_string(offset, 256)
+        local str = ashita.memory.read_string(offset, 256)
         if str then
-            local null_pos = str_find(str, '\x00', 1, true)
-            if null_pos then return str_sub(str, 1, null_pos - 1) end
+            local null_pos = string.find(str, '\x00', 1, true)
+            if null_pos then return string.sub(str, 1, null_pos - 1) end
             return str
         end
     end
@@ -473,26 +404,30 @@ end
 
 local MENU_UPDATE = 0.10
 
-local abilityLookup = {
-    ['Blood Pact: Rage'] = { timerId = 173, maxRecast = 60 },
-    ['Blood Pact: Ward'] = { timerId = 174, maxRecast = 60 },
-    ['Apogee']           = { timerId = 108, maxRecast = 60 },
-    ['Mana Cede']        = { timerId = 71,  maxRecast = 60 },
-    ['Ready']            = { timerId = 102, maxRecast = 30 },
-    ['Sic']              = { timerId = 102, maxRecast = 30 },
-    ['Reward']           = { timerId = 103, maxRecast = 90 },
-    ['Call Beast']       = { timerId = 104, maxRecast = 60 },
-    ['Call Wyvern']      = { timerId = 163, maxRecast = 1200 },
-    ['Spirit Link']      = { timerId = 162, maxRecast = 120 },
-    ['Deep Breathing']   = { timerId = 164, maxRecast = 60 },
-    ['Steady Wing']      = { timerId = 70,  maxRecast = 120 },
-    ['Activate']         = { timerId = 205, maxRecast = 60 },
-    ['Repair']           = { timerId = 206, maxRecast = 180 },
-    ['Deploy']           = { timerId = 207, maxRecast = 60 },
-    ['Deactivate']       = { timerId = 208, maxRecast = 60 },
-    ['Retrieve']         = { timerId = 209, maxRecast = 60 },
-    ['Deus Ex Automata'] = { timerId = 115, maxRecast = 60 },
+-- Pet commands and Blood Pacts by name -> recast timer id (Windower resources ability_recasts.lua).
+local ABILITY_TIMER = {
+    ['Blood Pact: Rage'] = 173, ['Blood Pact: Ward'] = 174, ['Apogee'] = 108, ['Mana Cede'] = 71,
+    ['Ready'] = 102, ['Sic'] = 102, ['Reward'] = 103, ['Call Beast'] = 104, ['Call Wyvern'] = 163,
+    ['Spirit Link'] = 162, ['Deep Breathing'] = 164, ['Steady Wing'] = 70, ['Activate'] = 205,
+    ['Repair'] = 206, ['Deploy'] = 207, ['Deactivate'] = 208, ['Retrieve'] = 209, ['Deus Ex Automata'] = 115,
 }
+
+-- An ability recast's full length is not in client data (IAbility has no recast delay; 0x119 sends time left), so
+-- it is the highest value seen since the timer last read 0. Sampled for all 32 slots by the render loop.
+local recast_peak = {}  -- timer id -> 1/60 s
+local function sample_recast_peaks(rc)
+    for slot = 0, 31 do
+        local tid = rc:GetAbilityTimerId(slot)
+        if tid ~= 0 or slot == 0 then
+            local t = rc:GetAbilityTimer(slot)
+            if t and t > 0 and t < RECAST_SENTINEL then
+                if t > (recast_peak[tid] or 0) then recast_peak[tid] = t end
+            else
+                recast_peak[tid] = nil
+            end
+        end
+    end
+end
 
 local SCH_JOB_ID = 20
 
@@ -507,7 +442,7 @@ end
 local function stratagem_max_charges()
     local lvl = get_job_level(SCH_JOB_ID)
     if lvl < 10 then return 0 end
-    local c = math_floor((lvl - 10) / 20) + 1
+    local c = math.floor((lvl - 10) / 20) + 1
     if c < 1 then c = 1 elseif c > 5 then c = 5 end
     return c
 end
@@ -524,14 +459,14 @@ local function charge_params(timerId, calc1, calc2)
     local mc = pool.max or stratagem_max_charges()
     if mc <= 0 then return nil end
     local full = pool.base + (calc2 or 0)
-    full = full - bit_band(calc1 or 0, 0x3F) * full / 60
+    full = full - bit.band(calc1 or 0, 0x3F) * full / 60
     if full < mc then full = mc end
     return mc, full / mc
 end
 
 local function compute_charges(recast_sec, max_charges, charge_time)
     if max_charges <= 0 or charge_time <= 0 then return max_charges, 0 end
-    local used = math_ceil(recast_sec / charge_time - 1e-6)
+    local used = math.ceil(recast_sec / charge_time - 1e-6)
     if used < 0 then used = 0 elseif used > max_charges then used = max_charges end
     local avail = max_charges - used
     local next_t = 0
@@ -544,9 +479,9 @@ end
 
 local function menu_obj(sel_sig)
     if sel_sig == 0 then return 0 end
-    local p = mem_read_uint32(sel_sig)
+    local p = ashita.memory.read_uint32(sel_sig)
     if p == 0 then return 0 end
-    p = mem_read_uint32(p)
+    p = ashita.memory.read_uint32(p)
     return p or 0
 end
 
@@ -554,15 +489,15 @@ local function menu_selected_id(sel_sig, getitem_fn)
     if sel_sig == 0 or not getitem_fn then return -1 end
     local obj = menu_obj(sel_sig)
     if obj == 0 then return -1 end
-    if mem_read_int32(obj + 0x40) <= 0 then return -1 end
-    local idx = mem_read_int32(obj + 0x30)
+    if ashita.memory.read_int32(obj + 0x40) <= 0 then return -1 end
+    local idx = ashita.memory.read_int32(obj + 0x30)
     return getitem_fn(obj, idx)
 end
 
 local function fmt_recast(s)
     if s < 0 then s = 0 end
-    local n = math_floor(s + 0.5)
-    return str_format('%d:%02d', math_floor(n / 60), n % 60)
+    local n = math.floor(s + 0.5)
+    return string.format('%d:%02d', math.floor(n / 60), n % 60)
 end
 
 local function ability_recast_raw_by_timer(timerId)
@@ -579,36 +514,11 @@ local function ability_recast_raw_by_timer(timerId)
     return 0, 0, 0
 end
 
-local function get_ability_recast_raw(ab, aid)
-    local name = ab.Name[1] or ab.Name[0]
-    local lk   = name and abilityLookup[name]
-    if lk then
-        local raw, c1, c2 = ability_recast_raw_by_timer(lk.timerId)
-        return raw, lk.maxRecast, lk.timerId, c1, c2
-    end
-
-    local tid = ab.RecastTimerId
-    if tid and tid >= 0 then
-        local raw, c1, c2 = ability_recast_raw_by_timer(tid)
-        return raw, (ab.RecastDelay or 0) / 4, tid, c1, c2
-    end
-
-    local rc = mgr.recast
-    if rc then
-        for slot = 0, 31 do
-            local stid = rc:GetAbilityTimerId(slot)
-            if stid > 0 or slot == 0 then
-                local a = rm:GetAbilityByTimerId(stid)
-                if a and a.Id == aid then
-                    local t = rc:GetAbilityTimer(slot)
-                    local raw = (t and t > 0 and t < RECAST_SENTINEL) and t or 0
-                    return raw, (ab.RecastDelay or 0) / 4, stid,
-                           rc:GetAbilityCalc1(slot) or 0, rc:GetAbilityCalc2(slot) or 0
-                end
-            end
-        end
-    end
-    return 0, (ab.RecastDelay or 0) / 4, (tid or -1), 0, 0
+-- raw (1/60 s), full length (s), timer id, calc1, calc2
+local function get_ability_recast_raw(ab)
+    local tid = ABILITY_TIMER[ab.Name[1]] or ab.RecastTimerId
+    local raw, c1, c2 = ability_recast_raw_by_timer(tid)
+    return raw, (recast_peak[tid] or 0) / 60, tid, c1, c2
 end
 
 local menu_cache = {
@@ -624,7 +534,7 @@ local menu_cache = {
 local function set_menu_recast(raw, max_sec)
     if raw and raw > 0 then
         local rem = raw / 60
-        local rem_int = math_floor(rem + 0.5)
+        local rem_int = math.floor(rem + 0.5)
         menu_cache.on_cd = true
 
         if rem_int ~= menu_cache.last_recast_str_sec then
@@ -634,7 +544,7 @@ local function set_menu_recast(raw, max_sec)
 
         menu_cache.recast_color = C.MENU_NOTRDY
         menu_cache.cd_frac      = (max_sec and max_sec > 0)
-            and math_max(0.0, math_min(1.0, 1 - rem / max_sec)) or 0
+            and math.max(0.0, math.min(1.0, 1 - rem / max_sec)) or 0
     else
         menu_cache.on_cd = false
         if menu_cache.last_recast_str_sec ~= 0 then
@@ -657,7 +567,7 @@ local function rebuild_menu_info()
         if sp then
             menu_cache.active     = true
             if sid ~= menu_cache.last_sid then
-                menu_cache.name       = sp.Name[1] or sp.Name[0] or 'Spell'
+                menu_cache.name       = sp.Name[1] or 'Spell'
                 menu_cache.last_sid = sid
             end
             -- name is shared: back in the ability/mount menu on the same entry
@@ -691,14 +601,14 @@ local function rebuild_menu_info()
         if ab then
             menu_cache.active     = true
             if aid ~= menu_cache.last_aid then
-                menu_cache.name       = ab.Name[1] or ab.Name[0] or 'Ability'
+                menu_cache.name       = ab.Name[1] or 'Ability'
                 menu_cache.last_aid = aid
             end
             menu_cache.last_mid = -2
             menu_cache.name_color = C.MENU_NAME
             menu_cache.bar_color  = C.MENU_BAR_JA
 
-            local raw, maxs, tid, c1, c2 = get_ability_recast_raw(ab, aid)
+            local raw, maxs, tid, c1, c2 = get_ability_recast_raw(ab)
             local recast_sec = (raw and raw > 0) and (raw / 60) or 0
 
             local mc, ctime = charge_params(tid, c1, c2)
@@ -711,7 +621,7 @@ local function rebuild_menu_info()
                 menu_cache.next_str     = (recast_sec > 0) and ('Next ' .. fmt_recast(next_t)) or ''
                 menu_cache.on_cd        = (recast_sec > 0)
                 menu_cache.cd_frac      = (recast_sec > 0 and ctime > 0)
-                    and math_max(0.0, math_min(1.0, 1 - next_t / ctime)) or 0
+                    and math.max(0.0, math.min(1.0, 1 - next_t / ctime)) or 0
                 return
             end
 
@@ -743,8 +653,7 @@ local function rebuild_menu_info()
     local mid = menu_selected_id(msig.mount, msig.fn_mount)
     if mid >= 0 then
         menu_cache.active = true
-        -- FIX: read the recast every rebuild. It was trapped in the mid-change
-        -- gate, so the shared mount cooldown was sampled once on hover then froze.
+        -- The recast is read every rebuild; only the name waits for a new mount id.
         if mid ~= menu_cache.last_mid then
             local nm = rm:GetString('mounts.names', mid)
             menu_cache.name = (nm and nm ~= '') and nm or 'Mount'
@@ -753,10 +662,9 @@ local function rebuild_menu_info()
         menu_cache.name_color = C.MENU_NAME
         menu_cache.bar_color  = C.MENU_BAR_JA
         menu_cache.cost       = ''
-        -- Mount recast is timed client-side (summon-anchored 60s; see the
-        -- mount table). Show the remaining cooldown the render loop computed.
+        -- Remaining mount cooldown, timed by the render loop (see the mount table).
         local raw  = 0
-        local rnow = os_clock()
+        local rnow = os.clock()
         if mount.cd_until > rnow then
             raw = (mount.cd_until - rnow) * 60   -- seconds left -> 1/60s for set_menu_recast
         end
@@ -769,26 +677,19 @@ end
 ------------------------------------------------------------
 -- TEXT FITTING
 ------------------------------------------------------------
--- Panels are a fixed bar_width + 16 wide, and ImGui clips text at the window
--- edge, so a narrow bar silently ate long mob names and the trailing cast '%'.
--- Rather than let the panels grow, every variable-length string is measured and
--- shortened to the space actually left on its line.
---
--- CalcTextSize is only hit on a cache miss: results are keyed by string + a
--- 4px-quantized budget, so a distance readout ticking 9.9 -> 10.0 does not
--- invalidate the entry. table_clear at 256 keys bounds it for good.
+-- Panels are a fixed bar_width + 16 wide and ImGui clips text at the window edge, so every variable-length
+-- string is measured and shortened to the space left on its line. CalcTextSize runs on a cache miss only:
+-- results are keyed by string + a 4px-quantized budget; table.clear at 256 keys bounds the cache.
 local ELLIPSIS  = '...'
 local SP        = 8      -- ItemSpacing.x allowance for a SameLine() gap
 local fit_cache = {}
 local fit_n     = 0
 
 local function measure(s)
-    local w = igCalcTextSize(s)
-    if type(w) == 'table' then w = w[1] end          -- binding may hand back an ImVec2
-    return (type(w) == 'number') and w or 0
+    return (imgui.CalcTextSize(s))
 end
 
--- Width memo: split_fit / menu reserve re-measured the same strings every frame.
+-- Width memo (split_fit, menu reserve).
 local tw_cache, tw_n = {}, 0
 local function text_w(s)
     if s == nil or s == '' then return 0 end
@@ -796,14 +697,14 @@ local function text_w(s)
     if w then return w end
     w = measure(s)
     tw_n = tw_n + 1
-    if tw_n > 256 then table_clear(tw_cache); tw_n = 1 end
+    if tw_n > 256 then table.clear(tw_cache); tw_n = 1 end
     tw_cache[s] = w
     return w
 end
 
 local function fit_text(s, max_w)
     if s == nil or s == '' then return '' end
-    local bucket = math_floor(max_w * 0.25)          -- quantize to 4px
+    local bucket = math.floor(max_w * 0.25)          -- quantize to 4px
     if bucket <= 0 then return '' end
     max_w = bucket * 4
 
@@ -820,15 +721,15 @@ local function fit_text(s, max_w)
         else
             local lo, hi = 0, #s                      -- longest prefix that fits
             while lo < hi do
-                local mid = math_floor((lo + hi + 1) * 0.5)
-                if measure(str_sub(s, 1, mid)) <= budget then lo = mid else hi = mid - 1 end
+                local mid = math.floor((lo + hi + 1) * 0.5)
+                if measure(string.sub(s, 1, mid)) <= budget then lo = mid else hi = mid - 1 end
             end
-            out = (lo > 0) and (str_sub(s, 1, lo) .. ELLIPSIS) or ''
+            out = (lo > 0) and (string.sub(s, 1, lo) .. ELLIPSIS) or ''
         end
     end
 
     fit_n = fit_n + 1
-    if fit_n > 256 then table_clear(fit_cache); fit_n = 1; row = nil end
+    if fit_n > 256 then table.clear(fit_cache); fit_n = 1; row = nil end
     if not row then row = {}; fit_cache[s] = row end
     row[bucket] = out
     return out
@@ -849,17 +750,17 @@ end
 
 local function begin_panel(win_id, px, py, panel_col, accent)
     v_pos[1], v_pos[2] = px, py
-    igSetNextWindowPos(v_pos, igCond_Always)
+    imgui.SetNextWindowPos(v_pos, ImGuiCond_Always)
 
     v_size[1], v_size[2] = rcache.win_w, 0
-    igSetNextWindowSize(v_size, igCond_Always)
+    imgui.SetNextWindowSize(v_size, ImGuiCond_Always)
 
     p_open[1] = true
-    if not igBegin(win_id, p_open, FLAGS_LOCKED) then return false, nil, 0 end
+    if not imgui.Begin(win_id, p_open, FLAGS_LOCKED) then return false, nil, 0 end
 
-    local wx, wy = igGetWindowPos()
-    local ww, wh = igGetWindowSize()
-    local dl = igGetWindowDrawList()
+    local wx, wy = imgui.GetWindowPos()
+    local ww, wh = imgui.GetWindowSize()
+    local dl = imgui.GetWindowDrawList()
     if dl then
         -- imgui clips a window's draw list inside half the window padding (left /
         -- right) and the border (top / bottom): the stripe and frame sit on the
@@ -893,9 +794,9 @@ end
 local function draw_menu_panel(px, py)
     local opened, dl, win_h = begin_panel('##thud_menu', px, py, C.PANEL_MENU)
     if opened then
-        local base = igGetCursorPosX()
-        igSetCursorPosX(base + PANEL_PADDING)
-        igSetCursorPosY(igGetCursorPosY() + TOP_PADDING)
+        local base = imgui.GetCursorPosX()
+        imgui.SetCursorPosX(base + PANEL_PADDING)
+        imgui.SetCursorPosY(imgui.GetCursorPosY() + TOP_PADDING)
 
         -- Reserve the right-hand cost/recast/charge text, then fit the name to
         -- whatever is left: the numbers matter more than the full spell name.
@@ -908,36 +809,36 @@ local function draw_menu_panel(px, py)
             if menu_cache.cost ~= '' then reserve = reserve + SP + text_w(menu_cache.cost) end
         end
 
-        igTextColored(menu_cache.name_color,
-            fit_text(menu_cache.name, base + rcache.bw - igGetCursorPosX() - reserve))
+        imgui.TextColored(menu_cache.name_color,
+            fit_text(menu_cache.name, base + rcache.bw - imgui.GetCursorPosX() - reserve))
 
         if menu_cache.is_charge then
-            igSameLine()
-            igTextColored(menu_cache.charge_color, menu_cache.charge_str)
+            imgui.SameLine()
+            imgui.TextColored(menu_cache.charge_color, menu_cache.charge_str)
             if menu_cache.next_str ~= '' then
-                igSameLine()
-                igTextColored(C.MENU_NOTRDY, menu_cache.next_str)
+                imgui.SameLine()
+                imgui.TextColored(C.MENU_NOTRDY, menu_cache.next_str)
             end
         else
             if menu_cache.cost ~= '' then
-                igSameLine()
-                igTextColored(menu_cache.cost_color, menu_cache.cost)
+                imgui.SameLine()
+                imgui.TextColored(menu_cache.cost_color, menu_cache.cost)
             end
-            igSameLine()
-            igTextColored(menu_cache.recast_color, menu_cache.recast)
+            imgui.SameLine()
+            imgui.TextColored(menu_cache.recast_color, menu_cache.recast)
         end
 
         if menu_cache.on_cd then
-            igSetCursorPosX(igGetCursorPosX() + PANEL_PADDING)
-            local cx, cy = igGetCursorScreenPos()
+            imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
+            local cx, cy = imgui.GetCursorScreenPos()
             v_size[1], v_size[2] = rcache.bw, CAST_BAR_HEIGHT
-            igDummy(v_size)
+            imgui.Dummy(v_size)
             if dl then
                 theme.bar(dl, cx, cy, rcache.bw, CAST_BAR_HEIGHT, menu_cache.cd_frac, menu_cache.bar_color)
             end
         end
     end
-    igEnd()
+    imgui.End()
     return win_h
 end
 
@@ -949,39 +850,38 @@ local handle_moved = false
 local function save_cfg() pcall(settings.save, 'bar') end
 
 local function draw_drag_handle()
-    local offset = math_max(rcache.bh, 18) + 10
+    local offset = math.max(rcache.bh, 18) + 10
     if force_handle then
         v_pos[1], v_pos[2] = cfg.pos_x, cfg.pos_y + offset
-        igSetNextWindowPos(v_pos, igCond_Always)
+        imgui.SetNextWindowPos(v_pos, ImGuiCond_Always)
         force_handle = false
     end
     p_open[1] = true
-    if igBegin('##thud_handle', p_open, FLAGS_MOVABLE) then
-        local wx, wy = igGetWindowPos()
-        local ww, wh = igGetWindowSize()
-        local dl = igGetWindowDrawList()
+    if imgui.Begin('##thud_handle', p_open, FLAGS_MOVABLE) then
+        local wx, wy = imgui.GetWindowPos()
+        local ww, wh = imgui.GetWindowSize()
+        local dl = imgui.GetWindowDrawList()
         if dl then
             v_p1[1], v_p1[2] = wx, wy
             v_p2[1], v_p2[2] = wx + ww, wy + wh
             dl:AddRectFilled(v_p1, v_p2, C.HANDLE_BG, 4.0)
         end
-        igSetCursorPosX(igGetCursorPosX() + PANEL_PADDING)
-        igSetCursorPosY(igGetCursorPosY() + TOP_PADDING)
-        igTextColored(C.HANDLE_TXT, 'goomui - drag to move  -  re-check Lock when done')
+        imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
+        imgui.SetCursorPosY(imgui.GetCursorPosY() + TOP_PADDING)
+        imgui.TextColored(C.HANDLE_TXT, 'goomui - drag to move  -  re-check Lock when done')
 
-        local nx, ny = math_floor(wx + 0.5), math_floor(wy + 0.5) - offset
+        local nx, ny = math.floor(wx + 0.5), math.floor(wy + 0.5) - offset
         if nx ~= cfg.pos_x or ny ~= cfg.pos_y then
             cfg.pos_x, cfg.pos_y = nx, ny
             handle_moved = true
         end
-        -- Save on release, but only if the handle actually moved. The old check
-        -- fired on any left-click release anywhere on screen.
-        if handle_moved and igIsMouseReleased(0) then
+        -- Save on release, only if the handle moved.
+        if handle_moved and imgui.IsMouseReleased(0) then
             handle_moved = false
             save_cfg()
         end
     end
-    igEnd()
+    imgui.End()
 end
 
 ------------------------------------------------------------
@@ -1036,12 +936,12 @@ local function refresh_party_cache(now)
     local party = mgr.party
     if not party then return end
 
-    table_clear(party_id_cache)
-    table_clear(party_masked_cache)
+    table.clear(party_id_cache)
+    table.clear(party_masked_cache)
 
     local sid = party:GetMemberServerId(0)
     self_id_cache  = sid or 0
-    self_id_masked = bit_band(self_id_cache, 0xFFFF)
+    self_id_masked = bit.band(self_id_cache, 0xFFFF)
     pos.self_idx   = party:GetMemberTargetIndex(0) or 0
     pos.self_hb    = hitbox_of(mgr.entity, pos.self_idx)
     for i = 0, 17 do
@@ -1049,7 +949,7 @@ local function refresh_party_cache(now)
             local sId = party:GetMemberServerId(i)
             if sId and sId ~= 0 then
                 party_id_cache[sId] = (i < 6) and 1 or 2
-                party_masked_cache[bit_band(sId, 0xFFFF)] = true
+                party_masked_cache[bit.band(sId, 0xFFFF)] = true
             end
         end
     end
@@ -1058,56 +958,50 @@ end
 ------------------------------------------------------------
 -- PARSE TARGET DATA
 ------------------------------------------------------------
--- NEAR inside range, MID within mid_pad past it, RED beyond (unconditional
--- catch-all, so a pet sitting past 50 stays RED instead of falling through to nil).
+-- NEAR inside range, MID within mid_pad past it, RED beyond.
 local function dist_color_for(dist, near_edge, mid_edge)
     return (dist < near_edge) and C.DIST_NEAR
         or (dist < mid_edge)  and C.DIST_MID
         or C.DIST_RED
 end
 
--- Where the color changes for this specific target. Falls back to the old fixed
--- cuts when the option is off or the hitbox binding is unavailable.
+-- Where the colour changes for this target; fixed 22 / 30 cuts when dynamic_range is off.
 local function range_edges(entity, idx)
     if not cfg.dynamic_range then return 22.0, 30.0 end
     local near = RANGE.base + pos.self_hb + hitbox_of(entity, idx)
     return near, near + RANGE.mid_pad
 end
 
--- Refresh only when the DISPLAYED value would change (tenths of a yalm).
--- Previously this gated on squared distance with a 2% relative threshold,
--- which meant the effective step was ~0.01 * dist (0.2 yalms at 20, 0.35 at 35)
--- and ~1/(2*dist) up close. One sqrt per bar per frame is free; correctness is not.
+-- The string is rebuilt only when the displayed value (tenths of a yalm) changes.
 local function update_dist(cache, dist_sq, near_edge, mid_edge)
-    local dist = math_sqrt(dist_sq)
-    local q    = math_floor(dist * 10.0 + 0.5)   -- quantize to tenths, matches '%.1f'
+    local dist = math.sqrt(dist_sq)
+    local q    = math.floor(dist * 10.0 + 0.5)   -- quantize to tenths, matches '%.1f'
     if cache.last_dq ~= q then
         cache.last_dq  = q
-        cache.dist_str = str_format('%.1f', q * 0.1)   -- format q, not dist, so string and gate never disagree
+        cache.dist_str = string.format('%.1f', q * 0.1)   -- format q, not dist, so string and gate never disagree
     end
     cache.dist_color = dist_color_for(dist, near_edge, mid_edge)
 end
 
--- FFXI's Y axis points DOWN: standing 3 yalms up a hill LOWERS your Y by 3.
--- (self - target) therefore gives the intuitive sign, + meaning target is above.
--- Worth showing because GetDistance is 3D, so a mob on a ledge reads far away
--- even when it is standing almost on top of you in ground terms.
+-- Height is Ashita's Z (SDK position_t order X, Z, Y; XiPackets 0x00E x, z, y). Sign as targetbar had it:
+-- self - target, + = target above (the height axis taken to point down). Worth showing because GetDistance is
+-- 3D: a mob on a ledge reads far away while standing almost on top of you in ground terms.
 local function update_height(cache, entity, idx)
-    if not pos.y_ok or idx == 0 or pos.self_idx == 0 then
+    if idx == 0 or pos.self_idx == 0 then
         cache.hgt_str = nil
         return
     end
-    local ty = entity:GetLocalPositionY(idx)
-    local sy = entity:GetLocalPositionY(pos.self_idx)
+    local ty = entity:GetLocalPositionZ(idx)
+    local sy = entity:GetLocalPositionZ(pos.self_idx)
     if type(ty) ~= 'number' or type(sy) ~= 'number' then
         cache.hgt_str = nil
         return
     end
     local h = sy - ty
-    local q = math_floor(h * 10.0 + 0.5)   -- round half toward +inf, same as the distance gate
+    local q = math.floor(h * 10.0 + 0.5)   -- round half toward +inf, same as the distance gate
     if cache.last_hq ~= q then
         cache.last_hq = q
-        cache.hgt_str = str_format('%+.1f', q * 0.1)
+        cache.hgt_str = string.format('%+.1f', q * 0.1)
     end
     cache.hgt_color = (h > RANGE.up or h < RANGE.down) and C.HEIGHT_WARN or C.HEIGHT_OK
 end
@@ -1116,9 +1010,9 @@ local function apply_hp(cache, hp_pct)
     cache.hp_pct    = hp_pct
     cache.hp_str    = PERCENT_STR_LUT[hp_pct] or (tostring(hp_pct) .. '%')
     cache.dead      = (hp_pct == 0)
-    cache.hp_frac   = math_max(0.0, math_min(1.0, hp_pct / 100.0))
+    cache.hp_frac   = math.max(0.0, math.min(1.0, hp_pct / 100.0))
     cache.bar_color = cache.dead and C.BAR_DEAD
-                    or HP_COLOR_LUT[math_max(0, math_min(100, hp_pct))]
+                    or HP_COLOR_LUT[math.max(0, math.min(100, hp_pct))]
 end
 
 local function parse_target_data(tIdx, out_cache, force_sub_brackets, entity, targ)
@@ -1134,9 +1028,9 @@ local function parse_target_data(tIdx, out_cache, force_sub_brackets, entity, ta
 
     if out_cache.spawn ~= spawn then
         out_cache.spawn  = spawn
-        out_cache.is_pc  = bit_band(spawn, 0x01) ~= 0
-        out_cache.is_npc = bit_band(spawn, 0x02) ~= 0
-        out_cache.is_mob = bit_band(spawn, 0x10) ~= 0
+        out_cache.is_pc  = bit.band(spawn, 0x01) ~= 0
+        out_cache.is_npc = bit.band(spawn, 0x02) ~= 0
+        out_cache.is_mob = bit.band(spawn, 0x10) ~= 0
     end
     local is_pc  = out_cache.is_pc
     local is_npc = out_cache.is_npc
@@ -1159,7 +1053,7 @@ local function parse_target_data(tIdx, out_cache, force_sub_brackets, entity, ta
         is_real_npc = true
     else
         local cs     = entity:GetClaimStatus(tIdx)
-        local claim_status = bit_band(cs or 0, 0xFFFF)
+        local claim_status = bit.band(cs or 0, 0xFFFF)
         if claim_status == 0 then
             name_color = C.ENEMY
         elseif claim_status == self_id_masked then
@@ -1170,12 +1064,11 @@ local function parse_target_data(tIdx, out_cache, force_sub_brackets, entity, ta
         end
     end
 
-    -- Lock-on brackets only for the locked (main) target: a Cure cast on an ally
-    -- while locked onto a mob used to show '[Ally]' in the cast bar.
+    -- Lock-on brackets only for the locked (main) target, not for a cast target picked while locked on.
     local is_locked = force_sub_brackets
     if not force_sub_brackets then
         local lf = targ and targ:GetLockedOnFlags()
-        is_locked = (lf ~= nil) and (bit_band(lf, 0x01) ~= 0)
+        is_locked = (lf ~= nil) and (bit.band(lf, 0x01) ~= 0)
                     and targ:GetTargetIndex(0) == tIdx or false
     end
 
@@ -1185,7 +1078,7 @@ local function parse_target_data(tIdx, out_cache, force_sub_brackets, entity, ta
         out_cache.display_name = is_locked and ('[' .. cur_name .. ']') or cur_name
     end
 
-    if out_cache.hp_pct ~= hp_pct then apply_hp(out_cache, hp_pct) end 
+    if out_cache.hp_pct ~= hp_pct then apply_hp(out_cache, hp_pct) end
 
     local near_edge, mid_edge = range_edges(entity, tIdx)
     update_dist(out_cache, dist_sq, near_edge, mid_edge)
@@ -1211,7 +1104,7 @@ local function parse_pet_data(petIdx, c, entity)
         c.raw_name     = nm
         c.display_name = nm
     end
-    if c.hp_pct ~= hp_pct then apply_hp(c, hp_pct) end 
+    if c.hp_pct ~= hp_pct then apply_hp(c, hp_pct) end
     local near_edge, mid_edge = range_edges(entity, petIdx)
     update_dist(c, dist_sq, near_edge, mid_edge)
     if cfg.show_height then update_height(c, entity, petIdx) else c.hgt_str = nil end
@@ -1253,44 +1146,44 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
     local panel_col, accent = panel_colors(data, force_blue)
     local opened, dl, win_h = begin_panel(win_id, pos_x, pos_y, panel_col, accent)
     if opened then
-        local base = igGetCursorPosX()
-        igSetCursorPosX(base + PANEL_PADDING)
-        if not is_sub then igSetCursorPosY(igGetCursorPosY() + TOP_PADDING) end
+        local base = imgui.GetCursorPosX()
+        imgui.SetCursorPosX(base + PANEL_PADDING)
+        if not is_sub then imgui.SetCursorPosY(imgui.GetCursorPosY() + TOP_PADDING) end
 
         if show_distance and not data.is_self then
-            igTextColored(data.dist_color, data.dist_str)
-            igSameLine()
+            imgui.TextColored(data.dist_color, data.dist_str)
+            imgui.SameLine()
         end
 
         if show_height and data.hgt_str and not data.is_self then
-            igTextColored(data.hgt_color, data.hgt_str)
-            igSameLine()
+            imgui.TextColored(data.hgt_color, data.hgt_str)
+            imgui.SameLine()
         end
 
         if not data.is_real_npc then
             if data.dead then
-                igTextColored(C.DEAD_TXT, 'DEAD')
+                imgui.TextColored(C.DEAD_TXT, 'DEAD')
             else
-                igTextColored(C.HP_TXT, data.hp_str)
+                imgui.TextColored(C.HP_TXT, data.hp_str)
             end
-            igSameLine()
+            imgui.SameLine()
         end
 
         if force_blue and menu_text and menu_text ~= '' then
-            igTextColored(C.MENU_TXT, menu_text)
-            igSameLine()
+            imgui.TextColored(C.MENU_TXT, menu_text)
+            imgui.SameLine()
         end
 
         -- Name is last on the line, so the cursor already accounts for the
         -- distance / height / HP / menu-hint prefixes: fit to what is left.
-        igTextColored(data.name_color,
-            fit_text(data.display_name, base + bar_width - igGetCursorPosX()))
+        imgui.TextColored(data.name_color,
+            fit_text(data.display_name, base + bar_width - imgui.GetCursorPosX()))
 
-        igSetCursorPosX(igGetCursorPosX() + PANEL_PADDING)
-        local cx, cy = igGetCursorScreenPos()
+        imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
+        local cx, cy = imgui.GetCursorScreenPos()
 
         v_size[1], v_size[2] = bar_width, bar_h
-        igDummy(v_size)
+        imgui.Dummy(v_size)
 
         if not is_sub then rcache.bar_dx = cx - pos_x end
         if dl then
@@ -1298,7 +1191,7 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
                 (not data.is_real_npc) and data.hp_frac or 0, data.bar_color)
         end
     end
-    igEnd()
+    imgui.End()
     return win_h
 end
 
@@ -1317,7 +1210,7 @@ local function draw_debuff_row(data, px, top, bar_width, win_id, hkey, force_blu
     if opened then
         mobdebuff.draw(dl, data.sid, rcache.bar_dx - DEBUFF_PAD[1], bar_width, tonumber(cfg.debuff_icon) or 18, data.raw_name)
     end
-    igEnd()
+    imgui.End()
     imgui.PopStyleVar(1)
     if win_h and win_h > 0 then rcache[hkey] = win_h end
 end
@@ -1329,39 +1222,39 @@ local function draw_cast_bar(cast_frac, pos_x, pos_y, bar_width)
     local opened, dl, win_h = begin_panel('##thud_cast', pos_x, pos_y,
         cast_state.is_item and C.PANEL_ITEM or C.PANEL_CAST)
     if opened then
-        local base = igGetCursorPosX()
-        igSetCursorPosX(base + PANEL_PADDING)
-        igSetCursorPosY(igGetCursorPosY() + TOP_PADDING)
+        local base = imgui.GetCursorPosX()
+        imgui.SetCursorPosX(base + PANEL_PADDING)
+        imgui.SetCursorPosY(imgui.GetCursorPosY() + TOP_PADDING)
 
         local done = cast_state.done_at > 0
-        local pct = (cast_frac > 0) and CAST_PERCENT_STR_LUT[math_floor(cast_frac * 100)] or nil
+        local pct = (cast_frac > 0) and CAST_PERCENT_STR_LUT[math.floor(cast_frac * 100)] or nil
         if done then pct = cast_state.done_ok and ' done' or ' interrupted' end
 
         -- The percent is the whole point of the bar, so it gets its width first
         -- (measured against ' 100%' so the layout does not shift at 100).
-        local avail = base + bar_width - igGetCursorPosX() - text_w(' -> ') - SP * 2
-        if pct then avail = avail - math_max(text_w(' 100%'), text_w(pct)) - SP end
+        local avail = base + bar_width - imgui.GetCursorPosX() - text_w(' -> ') - SP * 2
+        if pct then avail = avail - math.max(text_w(' 100%'), text_w(pct)) - SP end
 
         local nm, tgt = split_fit(
             cast_state.name ~= '' and cast_state.name or (cast_state.is_item and 'Item' or 'Action'),
             cast_state.display_target, avail)
 
-        igTextColored(cast_state.bar_color_txt, nm)
-        igSameLine()
-        igTextColored(C.ARROW, ' -> ')
-        igSameLine()
-        igTextColored(cast_state.target_color, tgt)
+        imgui.TextColored(cast_state.bar_color_txt, nm)
+        imgui.SameLine()
+        imgui.TextColored(C.ARROW, ' -> ')
+        imgui.SameLine()
+        imgui.TextColored(cast_state.target_color, tgt)
 
         if pct then
-            igSameLine()
-            igTextColored(done and (cast_state.done_ok and C.MENU_READY or C.MENU_NOTRDY) or C.HP_TXT, pct)
+            imgui.SameLine()
+            imgui.TextColored(done and (cast_state.done_ok and C.MENU_READY or C.MENU_NOTRDY) or C.HP_TXT, pct)
         end
 
-        igSetCursorPosX(igGetCursorPosX() + PANEL_PADDING)
-        local cx, cy = igGetCursorScreenPos()
+        imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
+        local cx, cy = imgui.GetCursorScreenPos()
 
         v_size[1], v_size[2] = bar_width, CAST_BAR_HEIGHT
-        igDummy(v_size)
+        imgui.Dummy(v_size)
 
         if dl then
             theme.bar(dl, cx, cy, bar_width, CAST_BAR_HEIGHT, cast_frac,
@@ -1369,7 +1262,7 @@ local function draw_cast_bar(cast_frac, pos_x, pos_y, bar_width)
                 or (cast_state.is_item and C.ITEM_BAR or C.SPELL_BAR))
         end
     end
-    igEnd()
+    imgui.End()
     return win_h
 end
 
@@ -1377,22 +1270,22 @@ end
 -- DRAW: JA FLASH BAR
 ------------------------------------------------------------
 local function draw_ja_bar(pos_x, pos_y)
-    local opened, _dl, win_h = begin_panel('##thud_ja', pos_x, pos_y, C.PANEL_JA)
+    local opened, _, win_h = begin_panel('##thud_ja', pos_x, pos_y, C.PANEL_JA)
     if opened then
-        local base = igGetCursorPosX()
-        igSetCursorPosX(base + PANEL_PADDING)
-        igSetCursorPosY(igGetCursorPosY() + TOP_PADDING)
+        local base = imgui.GetCursorPosX()
+        imgui.SetCursorPosX(base + PANEL_PADDING)
+        imgui.SetCursorPosY(imgui.GetCursorPosY() + TOP_PADDING)
 
         local nm, tgt = split_fit(ja_state.name, ja_state.display_target,
-            base + rcache.bw - igGetCursorPosX() - text_w(' -> ') - SP * 2)
+            base + rcache.bw - imgui.GetCursorPosX() - text_w(' -> ') - SP * 2)
 
-        igTextColored(C.JA_TXT, nm)
-        igSameLine()
-        igTextColored(C.ARROW, ' -> ')
-        igSameLine()
-        igTextColored(ja_state.target_color, tgt)
+        imgui.TextColored(C.JA_TXT, nm)
+        imgui.SameLine()
+        imgui.TextColored(C.ARROW, ' -> ')
+        imgui.SameLine()
+        imgui.TextColored(ja_state.target_color, tgt)
     end
-    igEnd()
+    imgui.End()
     return win_h
 end
 
@@ -1400,8 +1293,8 @@ end
 -- ITEM NAME LOOKUP
 ------------------------------------------------------------
 local function resolve_item_name(data)
-    local slot      = unpack('B', data, 15)
-    local container = unpack('B', data, 17)
+    local slot      = struct.unpack('B', data, 15)
+    local container = struct.unpack('B', data, 17)
     local inv       = mgr.inv
 
     if not inv then return 'Item', nil end
@@ -1410,7 +1303,7 @@ local function resolve_item_name(data)
     if not item then return 'Item', nil end
     local r = rm:GetItemById(item.Id)
 
-    return (r and (r.Name[1] or r.Name[0])) or 'Item', r
+    return (r and r.Name[1]) or 'Item', r
 end
 
 ------------------------------------------------------------
@@ -1420,32 +1313,26 @@ function M.packet_in(e)
     if e.id == 0x028 then
         if e.size < 0x1D then return end   -- header + one target + first result (value ends at bit 230)
 
-        -- Cheapest possible gate first: actor id (bits 40-71). The vast
-        -- majority of 0x028 traffic in a busy zone is other actors; one
-        -- 4-byte read + compare rejects all of it before any bit math.
-        -- (The old handler read the actor id's low word at this offset as a
-        -- 'message id', so its interrupt/deny checks fired on garbage and
-        -- attempted-but-rejected actions slipped through to the fallback bar.)
+        -- Actor id (bits 40-71) first: most 0x028 traffic is other actors.
         local me = self_id_cache
         if me == 0 then
             local pt = mgr.party
             me = pt and pt:GetMemberServerId(0) or 0
         end
-        if me == 0 or unpack('I', e.data_modified, 0x06) ~= me then return end
+        if me == 0 or struct.unpack('I', e.data_modified, 0x06) ~= me then return end
 
-        local b10 = unpack('B', e.data_modified, 0x0B)
-        local cat = math_floor(b10 / 4) % 16          -- category: bits 82-85
+        local b10 = struct.unpack('B', e.data_modified, 0x0B)
+        local cat = math.floor(b10 / 4) % 16          -- category: bits 82-85
 
         if cat == 8 or cat == 9 then
             -- Magic (8) / item (9) start-or-interrupt. Param: bits 86-101.
-            local param = math_floor(b10 / 64)
-                        + unpack('B', e.data_modified, 0x0C) * 4
-                        + (unpack('B', e.data_modified, 0x0D) % 64) * 1024
+            local param = math.floor(b10 / 64)
+                        + struct.unpack('B', e.data_modified, 0x0C) * 4
+                        + (struct.unpack('B', e.data_modified, 0x0D) % 64) * 1024
             -- XiPackets 0x0028: cmd_no 8 result value = spell id, cmd_no 9 = item id
             -- (0 when interrupted). First result's value: bits 213-229.
-            -- Only an echo of the SAME kind (and id, when known) may confirm or
-            -- cancel: a spell 'begin' used to confirm a pending item attempt the
-            -- server never accepted, which then animated as a phantom item bar.
+            -- Only an echo of the same kind (and id, when known) may confirm or cancel a pending
+            -- attempt, so a spell 'begin' never confirms an item the server refused.
             local is_item_pkt = (cat == 9)
             if param == ACT_INTERRUPT then
                 if pending_cast_state.name ~= '' and pending_cast_state.is_item == is_item_pkt then
@@ -1469,9 +1356,9 @@ function M.packet_in(e)
             -- a cast so fast it never got a bar (still pending) is shown as done.
             -- A pending action of another id is left alone (chain casting: the
             -- finish for A can arrive after B was sent).
-            local id = math_floor(b10 / 64)
-                     + unpack('B', e.data_modified, 0x0C) * 4
-                     + (unpack('B', e.data_modified, 0x0D) % 64) * 1024
+            local id = math.floor(b10 / 64)
+                     + struct.unpack('B', e.data_modified, 0x0C) * 4
+                     + (struct.unpack('B', e.data_modified, 0x0D) % 64) * 1024
             local is_item_pkt = (cat == 5)
             if cast_state.name ~= '' and cast_state.done_at == 0 and cast_state.is_item == is_item_pkt
             and (cast_state.action_id == nil or cast_state.action_id == id) then
@@ -1480,12 +1367,12 @@ function M.packet_in(e)
             and (pending_cast_state.action_id == nil or pending_cast_state.action_id == id) then
                 promote_pending()
                 cast_state.time_driven = false
-                cast_state.start_time  = os_clock()
+                cast_state.start_time  = os.clock()
                 pending_cast_state.name, pending_cast_state.confirmed = '', false
                 mark_done(true)
             end
         elseif (cat == 6 or cat == 14 or cat == 15) and ja_pending.deadline > 0 then
-            local jnow = os_clock()
+            local jnow = os.clock()
             if jnow >= ja_pending.deadline then
                 ja_pending.deadline = 0
             else
@@ -1521,17 +1408,17 @@ function M.packet_out(e)
     if e.id ~= 0x1A and e.id ~= 0x37 then return end
     if e.size < 0x0E then return end
 
-    -- ActIndex: 0x1A at 0x08, 0x37 at 0x0C (XiPackets GP_CLI_ACTION / GP_CLI_ITEM_USE).
-    -- 0x37 used to read ItemNum here, so item targets were never resolved.
-    local target_idx = unpack('H', e.data_modified, (e.id == 0x1A) and 0x09 or 0x0D)
-    local category   = (e.id == 0x1A) and unpack('H', e.data_modified, 0x0B) or 0
-    local action_id  = (e.id == 0x1A) and unpack('H', e.data_modified, 0x0D) or 0
+    -- ActIndex: 0x1A at 0x08, 0x37 at 0x0C (XiPackets GP_CLI_ACTION / GP_CLI_ITEM_USE). Items are used
+    -- through 0x37 only (0x1A ActionID 5 is /help).
+    local target_idx = struct.unpack('H', e.data_modified, (e.id == 0x1A) and 0x09 or 0x0D)
+    local category   = (e.id == 0x1A) and struct.unpack('H', e.data_modified, 0x0B) or 0
+    local action_id  = (e.id == 0x1A) and struct.unpack('H', e.data_modified, 0x0D) or 0
 
     local entity_mgr = mgr.entity
 
     if e.id == 0x1A and category == 9 then
         local r  = rm:GetAbilityById(action_id + 512)
-        local nm = r and (r.Name[1] or r.Name[0])
+        local nm = r and r.Name[1]
         if nm and nm ~= '' then
             local t_name, t_color = 'Self', C.PC_SELF
             if target_idx ~= 0 and entity_mgr then
@@ -1544,7 +1431,7 @@ function M.packet_out(e)
             ja_pending.name           = nm
             ja_pending.display_target = t_name
             ja_pending.target_color   = t_color
-            ja_pending.deadline       = os_clock() + 3.0
+            ja_pending.deadline       = os.clock() + 3.0
         end
         return
     end
@@ -1553,25 +1440,19 @@ function M.packet_out(e)
     if e.id == 0x1A and category == 3 then
         local r = rm:GetSpellById(action_id)
         if r then
-            action_name = r.Name[1] or r.Name[0]
+            action_name = r.Name[1] or ''
             cast_secs   = resource_cast_seconds(r)
             sent_id     = action_id
         end
-    elseif (e.id == 0x1A and category == 5) or e.id == 0x37 then
+    elseif e.id == 0x37 then
         local r
-        if e.id == 0x1A then
-            r = rm:GetItemById(action_id)
-            action_name = (r and (r.Name[1] or r.Name[0])) or 'Item'
-            sent_id = action_id
-        else
-            action_name, r = resolve_item_name(e.data_modified)
-            sent_id = r and r.Id or nil
-        end
+        action_name, r = resolve_item_name(e.data_modified)
+        sent_id   = r and r.Id or nil
         is_item   = true
         cast_secs = resource_cast_seconds(r)
     end
 
-    if is_excluded_text(str_lower(action_name)) then return end
+    if is_excluded_text(string.lower(action_name)) then return end
 
     if action_name == '' or action_name == 'Gil' then return end
 
@@ -1594,7 +1475,7 @@ function M.packet_out(e)
     pending_cast_state.duration      = cast_secs or 0
     pending_cast_state.action_id     = sent_id
     pending_cast_state.confirmed     = false   -- attempt only; server has not committed yet
-    pending_time                     = os_clock()
+    pending_time                     = os.clock()
 end
 
 ------------------------------------------------------------
@@ -1603,7 +1484,7 @@ end
 function M.render()
     if not is_game_active() then return end
 
-    local now = os_clock()
+    local now = os.clock()
     local dt  = now - cast_state.last_present
     if dt < 0 then dt = 0 elseif dt > 0.1 then dt = 0.1 end
     cast_state.last_present = now
@@ -1611,15 +1492,14 @@ function M.render()
     local bw  = rcache.bw
     local bh  = rcache.bh
 
--- Mount recast: arm the summon-anchored timer on the mount status 0->1 edge (Buff ID 252).
+    -- Slow tick: ability recast peaks, and the mount timer armed on the Mount status (buff 252) 0->1 edge.
     if now - mount.chk >= mount.interval then
         mount.chk = now
+        if mgr.recast then sample_recast_peaks(mgr.recast) end
         local mpl = mgr.player
         if mpl and mpl:GetIsZoning() == 0 then
             local is_mounted = false
             local buffs = mpl:GetBuffs()
-            
-            -- Check the player's active buffs for the Mount status
             if buffs then
                 for _, b in pairs(buffs) do
                     if b == 252 then
@@ -1628,7 +1508,6 @@ function M.render()
                     end
                 end
             end
-            
             local cur = is_mounted and 1 or 0
             if cur ~= 0 and mount.id == 0 then
                 mount.cd_until = now + mount.recast
@@ -1666,9 +1545,8 @@ function M.render()
         reset_cast()
     end
 
-    -- Fallback (time-driven) promotion now requires the server's 'begins'
-    -- echo (0x028 cat 8/9, param 24931). An attempted cast/item use that the
-    -- server rejects never confirms, so it can no longer paint a phantom bar.
+    -- Fallback (time-driven) promotion needs the server's 'begins' echo (0x028 cat 8/9, param 24931): an
+    -- attempt the server rejects never confirms, so it never paints a bar.
     if pending_cast_state.name ~= ''
     and pending_cast_state.confirmed
     and (now - pending_time) >= FALLBACK_GRACE
@@ -1698,12 +1576,12 @@ function M.render()
             cb_alive               = true
         else
             local d = cast_state.duration
-            disp_frac = (d > 0) and math_min(1.0, (now - cast_state.start_time) / d) or 0
+            disp_frac = (d > 0) and math.min(1.0, (now - cast_state.start_time) / d) or 0
         end
     end
 
     if cast_state.name ~= '' and cast_state.done_at == 0 and disp_frac > 0 and disp_frac < 1.0 then
-        if math_abs(disp_frac - last_disp_frac) > 0.001 then
+        if math.abs(disp_frac - last_disp_frac) > 0.001 then
             last_frac_change_time = now
         elseif (now - last_frac_change_time > 0.25) then
             reset_cast()
@@ -1712,11 +1590,8 @@ function M.render()
     last_cast_frac = cast_frac
     last_disp_frac = disp_frac
 
-    -- OPT: frame-rate-independent visual smoothing of the cast fill.
-    -- cb:GetPercent() steps coarsely, so the raw bar looked chunky at high FPS.
-    -- Ease a render-only fraction toward disp_frac; snap on a new cast (start_time
-    -- edge) and when idle/complete so the lifecycle logic above is unaffected.
-    -- State lives on cast_state (already captured) to stay under the 60-upvalue cap.
+    -- Frame-rate-independent smoothing of the cast fill (cb:GetPercent() steps coarsely): ease a render-only
+    -- fraction toward disp_frac; snap on a new cast (start_time edge) and when idle / complete.
     if cast_state.name == '' then
         cast_state.render_frac   = 0.0
         cast_state.cr_last_start = cast_state.start_time
@@ -1757,14 +1632,12 @@ function M.render()
     local targ     = mgr.targ
     local entity   = mgr.entity
 
-    local main_idx = 0
-    local sub_idx  = 0
-
     if targ and entity then
-        main_idx = targ:GetTargetIndex(0)
+        local main_idx = targ:GetTargetIndex(0)
+        local sub_idx
         local sub_raw         = targ:GetIsSubTargetActive()
         local current_sub_idx = targ:GetTargetIndex(1)
-        if sub_raw ~= nil and sub_raw ~= 0 and sub_raw ~= false and current_sub_idx ~= 0 then
+        if sub_raw ~= 0 and current_sub_idx ~= 0 then
             sub_target_persistence = current_sub_idx
             sub_target_expires     = now + 2.0
         end
@@ -1789,7 +1662,7 @@ function M.render()
                 if raw_text == '' then
                     last_menu_text = ''
                 else
-                    last_menu_text = is_excluded_text(str_lower(raw_text))
+                    last_menu_text = is_excluded_text(string.lower(raw_text))
                         and '' or ('(' .. raw_text .. ')')
                 end
             end

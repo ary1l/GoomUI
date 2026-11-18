@@ -26,7 +26,6 @@ customtarget addon does: unload that one.
   `<stnpc>` and `<stpc>` picks use it too. Default TP ready.
 - **Float:** drifts up and down 2.5 px.
 - **Lift over players:** 12 px higher over players (0-40), clearing the master level stars on their nameplate.
-- **Presets:** goomui (gem, MP / TP ready), Classic (gem, white / blue), Crystal, Minimal (hollow, white / blue).
 - **Apply to all characters:** sends the cursor settings to every character with `/mss` (MultiSend). The Look tab
   has the same button for the colour preset, bar look and panels.
 - **Placement:** the head point the game puts the name at (skeleton bone 2, read as customtarget reads it); doors and

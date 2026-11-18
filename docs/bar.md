@@ -12,6 +12,9 @@ still stacks upward). A docked AAEV chart then sits under the main target's row.
 - **Size:** Bar tab, Width / Height.
 - **Shows:** distance (coloured by range, hitboxes counted when *Range colors account for hitbox size* is on),
   height offset (optional), HP %, name coloured by relation / claim.
+- **Menu recast:** hovering a spell, ability or mount in the game menus shows its cost and recast. An ability's bar
+  fills from the moment goomui saw its recast start (the client holds no full ability recast length); charges for
+  Stratagems, Quick Draw and Ready; mounts 1:00 from the summon.
 
 ## Target kinds
 
@@ -64,13 +67,14 @@ gap above it, so a mob's row and panel read as one block. Bar tab:
 
 Shown while the pool has items (Bar tab: *Show treasure pool window*; `/goomui pool demo` for sample items).
 
-- **Summary** (default): one line between the party list and alliance 1, `Pool 8  3 to lot  4:31` (items, how many
-  you have not acted on, soonest time left), outlined for a few seconds when something drops. It sits in the gap under
+- **Summary** (default): one line between the party list and alliance 1, `Pool  8 items  3 to lot  4:31 left  [+]`
+  (items, how many you have not acted on, soonest time left, `[+]` / `[-]` = window hidden / shown), framed for a few
+  seconds when something drops. It sits in the gap under
   the alliance's last member (full or low-fi lists); with a full alliance (no gap), above the alliance lists. Click it to show or
   hide the window. Off (Bar tab, or `/goomui pool dock`): the window alone, as before.
 - **Window:** drag it anywhere off the buttons; the spot is saved. Per item: name, time left, then each member's lot
   high to low (current leader gold, yours green), `pass:` names, and `waiting N` for members in your zone who have
-  not acted (names on hover).
+  not acted (names on hover; trusts are not counted, they never lot).
 
 - Buttons: **Lot** (until you act on the item), **Pass** (until you pass), **Lot all** (every item you have not acted
   on), **Pass all** (click twice within 3 s). They send what the game's treasure menu sends (0x041 / 0x042,
