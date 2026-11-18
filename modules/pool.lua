@@ -307,7 +307,8 @@ end
 ------------------------------------------------------------
 local CHIP_FLAGS = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_AlwaysAutoResize,
     ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav, ImGuiWindowFlags_NoBackground, ImGuiWindowFlags_NoMove);
-local chipW, chipH = 150, 20; -- its size last frame (placement uses it)
+local chipW, chipH = 150, 16; -- its size last frame (placement uses it)
+local CHIP_PAD = { 6, 1 };     -- one text line high: fits the low-fi gap under an alliance (one empty 12 px row + 6)
 local chip_open = { true };
 
 local function dock()
@@ -331,21 +332,25 @@ local function summary(n) -- items you have not acted on, soonest time left (nil
     return act, soon, newest;
 end
 
--- Right-aligned to the party list, centred in the gap under alliance 1's last member (else just above the party
--- list); with the lists hidden, just above the window's saved spot.
+-- Right-aligned to the party list: centred in the gap under the alliance's last member row; no room there (a full
+-- alliance), above the alliance lists, never over a member; no alliance, just above the party list. With the lists
+-- hidden, just above the window's saved spot.
 local function draw_chip(n)
-    local right, top, above = dock();
+    local right, top, above, stack = dock();
     local x, y = cfg.pool_x, cfg.pool_y - chipH - 4;
     if (right ~= nil) then
         x = math.floor(right - chipW);
-        if (above ~= nil and (top - above) >= chipH + 4) then
+        if (above == nil) then
+            y = math.floor(top - chipH - 2);
+        elseif ((top - above) >= chipH + 2) then
             y = math.floor(above + ((top - above) - chipH) / 2);
         else
-            y = math.floor(top - chipH - 2);
+            y = math.floor(stack - chipH - 2);
         end
     end
     imgui.SetNextWindowPos({ x, y }, ImGuiCond_Always);
     chip_open[1] = true;
+    imgui.PushStyleVar(ImGuiStyleVar_WindowPadding, CHIP_PAD);
     if (imgui.Begin('##goomui_pool_chip', chip_open, CHIP_FLAGS)) then
         local wx, wy = imgui.GetWindowPos();
         local ww, wh = imgui.GetWindowSize();
@@ -375,6 +380,7 @@ local function draw_chip(n)
         end
     end
     imgui.End();
+    imgui.PopStyleVar();
 end
 
 function M.render()
