@@ -65,7 +65,8 @@ gap above it, so a mob's row and panel read as one block. Bar tab:
 Shown while the pool has items (Bar tab: *Show treasure pool window*; `/goomui pool demo` for sample items).
 
 - **Summary** (default): one line between the party list and alliance 1, `Pool 8  3 to lot  4:31` (items, how many
-  you have not acted on, soonest time left), outlined for a few seconds when something drops. Click it to show or
+  you have not acted on, soonest time left), outlined for a few seconds when something drops. It sits in the gap under
+  the alliance's last member (full or low-fi lists); with a full alliance (no gap), above the alliance lists. Click it to show or
   hide the window. Off (Bar tab, or `/goomui pool dock`): the window alone, as before.
 - **Window:** drag it anywhere off the buttons; the spot is saved. Per item: name, time left, then each member's lot
   high to low (current leader gold, yours green), `pass:` names, and `waiting N` for members in your zone who have
