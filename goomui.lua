@@ -27,25 +27,36 @@ local pool     = require('modules/pool');
 --]]
 local cfg = { bar = nil, ring = nil, aaev = nil };
 
+local function say(s) print(chat.header(addon.name):append(chat.message(s))); end
+
 local function char_folder()
     return settings.settings_path():match('([^\\]+)\\+$') or 'defaults';
 end
 
--- targethud 1.x kept bar/ring/aaev under config/addons/targethud/<char>/<alias>.lua.
--- Copied once (same keys, same types) into goomui's file for that character.
-local function from_targethud(alias, s, defaults)
-    local file = ('%s\\config\\addons\\targethud\\%s\\%s.lua'):fmt(AshitaCore:GetInstallPath(), char_folder(), alias);
-    if (not ashita.fs.exists(file)) then return false; end
-    local ok, old = pcall(function () return loadfile(file)(); end);
-    if (not ok or type(old) ~= 'table') then return false; end
+local function load_file(file)
+    if (not ashita.fs.exists(file)) then return nil; end
+    local ok, t = pcall(dofile, file);
+    return (ok and type(t) == 'table') and t or nil;
+end
+
+-- Copies the keys defaults has, when the old value has the same type; returns how many.
+local SKIP = { migrated = true };
+local function copy_keys(old, s, defaults)
     local n = 0;
     for k, v in pairs(defaults) do
-        if (k ~= 'migrated' and old[k] ~= nil and type(old[k]) == type(v)) then
+        if (not SKIP[k] and old[k] ~= nil and type(old[k]) == type(v)) then
             s[k] = old[k];
             n = n + 1;
         end
     end
-    print(chat.header(addon.name):append(chat.message(('Imported %d targethud %s settings (%s).'):fmt(n, alias, char_folder()))));
+    return n;
+end
+
+-- targethud 1.x kept bar/ring/aaev under config/addons/targethud/<char>/<alias>.lua.
+local function from_targethud(alias, s, defaults)
+    local old = load_file(('%s\\config\\addons\\targethud\\%s\\%s.lua'):fmt(AshitaCore:GetInstallPath(), char_folder(), alias));
+    if (old == nil) then return false; end
+    say(('Imported %d targethud %s settings (%s).'):fmt(copy_keys(old, s, defaults), alias, char_folder()));
     return true;
 end
 
@@ -53,31 +64,13 @@ end
 local function migrate(alias, s, defaults, old_addon)
     if (s.migrated) then return; end
     s.migrated = true;
-    if (from_targethud(alias, s, defaults)) then settings.save(alias); return; end
-
-    local folder = char_folder();
-    local file = ('%s\\config\\addons\\%s\\%s\\settings.lua'):fmt(AshitaCore:GetInstallPath(), old_addon, folder);
-    if (ashita.fs.exists(file)) then
-        local ok, old = pcall(function () return loadfile(file)(); end);
-        if (ok and type(old) == 'table') then
-            local n = 0;
-            for k, v in pairs(defaults) do
-                if (k ~= 'migrated' and old[k] ~= nil and type(old[k]) == type(v)) then
-                    s[k] = old[k];
-                    n = n + 1;
-                end
-            end
-            print(chat.header(addon.name):append(chat.message(('Imported %d %s settings (%s).'):fmt(n, old_addon, folder))));
+    if (not from_targethud(alias, s, defaults)) then
+        local old = load_file(('%s\\config\\addons\\%s\\%s\\settings.lua'):fmt(AshitaCore:GetInstallPath(), old_addon, char_folder()));
+        if (old ~= nil) then
+            say(('Imported %d %s settings (%s).'):fmt(copy_keys(old, s, defaults), old_addon, char_folder()));
         end
     end
-
     settings.save(alias);
-end
-
-local function load_file(file)
-    if (not ashita.fs.exists(file)) then return nil; end
-    local ok, t = pcall(dofile, file);
-    return (ok and type(t) == 'table') and t or nil;
 end
 
 -- AAEV kept one shared (not per-char) set in its addon folder:
@@ -118,7 +111,7 @@ local function migrate_aaev(s)
         s.enabled = true;
         local n = 0;
         for _ in pairs(keys) do n = n + 1; end
-        print(chat.header(addon.name):append(chat.message(('Imported %d aaev settings (%s); AAEV enabled.'):fmt(n, char_folder()))));
+        say(('Imported %d aaev settings (%s); AAEV enabled.'):fmt(n, char_folder()));
     end
 
     settings.save('aaev');
@@ -206,7 +199,17 @@ end);
 ashita.events.register('packet_in',  'thud_bar_in',   function (e) bar.packet_in(e);  end);
 ashita.events.register('packet_in',  'thud_ring_in',  function (e) ring.packet_in(e); end);
 ashita.events.register('packet_in',  'thud_aaev_in',  function (e) aaev.packet_in(e); end);
-ashita.events.register('packet_in',  'thud_debuff_in', function (e) mobdebuff.packet_in(e); end);
+-- Mob debuffs: 0x028 / 0x029 only while the row is on (Bar tab); zone, merit and job point packets always.
+local debuffs_on = true;
+ashita.events.register('packet_in',  'thud_debuff_in', function (e)
+    local on = (cfg.bar == nil) or (cfg.bar.show_debuffs ~= false);
+    if (on ~= debuffs_on) then
+        debuffs_on = on;
+        if (not on) then mobdebuff.clear(); end
+    end
+    if (not on and (e.id == 0x028 or e.id == 0x029)) then return; end
+    mobdebuff.packet_in(e);
+end);
 ashita.events.register('packet_in',  'thud_pool_in',  function (e) pool.packet_in(e); end);
 ashita.events.register('packet_out', 'thud_bar_out',  function (e) bar.packet_out(e);  end);
 ashita.events.register('packet_out', 'thud_ring_out', function (e) ring.packet_out(e); end);
@@ -235,8 +238,6 @@ ashita.events.register('d3d_present', 'thud_bar_draw',  guard('Target bar', func
 ashita.events.register('d3d_present', 'thud_pool_draw', guard('Treasure pool window', function () pool.render(); end));
 ashita.events.register('d3d_present', 'thud_aaev_draw', guard('AAEV', function () aaev.render(); end));
 ashita.events.register('d3d_present', 'thud_gui_draw',  guard('Settings window', function () gui.render(cfg, bar, ring, aaev, party); end));
-
-local function say(s) print(chat.header(addon.name):append(chat.message(s))); end
 
 -- /goomui look ...: preset by name or next / prev; shape / texture / frame.
 local function look_command(a, b, args)
@@ -293,7 +294,7 @@ local HELP = {
     '/goomui ring on|off|depth|arrow|runes|fade|flip',
     '/goomui ring scale <n> | slices <n>',
     '/goomui ring range on|off|geo|hitbox | base <n> | fill <n>',
-    '/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | lift <px> | preset <name>',
+    '/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | lift <px>',
     '/goomui geo [on|off|buffs|cure|bubble|clear | radius|cap|scan|slices <n>]',
     '/goomui aaev on|off             enable / disable auto-attack chart',
     '/goomui aaev [show|hide|demo|lock|unlock|zone|help ...]',
@@ -330,17 +331,15 @@ ashita.events.register('command', 'thud_command', function (e)
         local opt = args[3] and args[3]:lower() or nil;
         if (opt == 'on' or opt == 'off') then
             aaev.set_enabled(opt == 'on');
-            print(chat.header(addon.name):append(chat.message('AAEV ' .. opt .. '.')));
+            say('AAEV ' .. opt .. '.');
         elseif (not aaev.enabled() and opt ~= 'config') then
-            print(chat.header(addon.name):append(chat.message('AAEV is off: /goomui aaev on')));
+            say('AAEV is off: /goomui aaev on');
         else
             local a = { args[1] };
             for i = 3, #args do a[#a + 1] = args[i]; end
             aaev.command(a);
         end
     else
-        for _, line in ipairs(HELP) do
-            print(chat.header(addon.name):append(chat.message(line)));
-        end
+        for _, line in ipairs(HELP) do say(line); end
     end
 end);

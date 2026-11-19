@@ -353,7 +353,6 @@ T.PLATE   = {  8, 12, 14, 120 };
 
 -- Text (imgui floats)
 T.TXT       = f4(235, 240, 250);
-T.TXT_DIM   = f4(150, 160, 175);
 T.TXT_LABEL = f4(128, 138, 152);
 
 local HP_STOPS = {
@@ -377,12 +376,10 @@ end
 
 local function rgb_u32(c, a) return u32(c[1], c[2], c[3], a); end
 local function rgb_argb(c, a) return argb(c[1], c[2], c[3], a); end
-T.rgb_u32, T.rgb_argb = rgb_u32, rgb_argb;
 
 T.HP_U32, T.HP_ARGB = { }, { };
 T.U = {
     TRACK   = u32(T.TRACK[1], T.TRACK[2], T.TRACK[3], T.TRACK[4]),
-    PLATE   = u32(T.PLATE[1], T.PLATE[2], T.PLATE[3], T.PLATE[4]),
     HI_BAND = u32(255, 255, 255, 22),   -- upper band of a fill
     HI_LINE = u32(255, 255, 255, 64),   -- 1px top highlight
     LO_LINE = u32(0, 0, 0, 70),         -- 1px bottom edge
@@ -465,10 +462,10 @@ local TEXTURES = { segmented = true, striped = true, quarters = true, scanline =
 --   framed  tinted, plus a 1px frame in the kind colour
 -- panel_alpha multiplies the plate opacity (0.25 - 2).
 T.PANEL_ORDER = { 'tinted', 'dark', 'clear', 'framed' };
+local PANELS = { tinted = true, dark = true, clear = true, framed = true };
 T.panel_style, T.panel_alpha = 'tinted', 1.0;
 function T.set_panel(style, alpha)
-    T.panel_style = (T.STYLE_LABEL[style] ~= nil and (style == 'tinted' or style == 'dark' or style == 'clear' or style == 'framed'))
-        and style or 'tinted';
+    T.panel_style = PANELS[style] and style or 'tinted';
     alpha = tonumber(alpha) or 1.0;
     T.panel_alpha = (alpha < 0.25) and 0.25 or ((alpha > 2.0) and 2.0 or alpha);
 end
@@ -600,9 +597,15 @@ for j, c in pairs(JOB_COL) do
     T.JOB_F4[j], T.JOB_ARGB[j] = { c[1], c[2], c[3], 1.0 }, argb(r, g, b);
 end
 
--- imgui: themed panel plate (rounded)
-function T.plate(dl, x1, y1, x2, y2, col)
-    frect(dl, x1, y1, x2, y2, col or T.U.PLATE, 3.0);
+-- imgui: text with a 1px black outline (readable on any background, like the party list text).
+local OUTLINE, TP, BLACK = { { -1, 0 }, { 1, 0 }, { 0, -1 }, { 0, 1 } }, { 0, 0 }, u32(0, 0, 0);
+function T.text_outlined(dl, x, y, col, s)
+    for k = 1, 4 do
+        TP[1], TP[2] = x + OUTLINE[k][1], y + OUTLINE[k][2];
+        dl:AddText(TP, BLACK, s);
+    end
+    TP[1], TP[2] = x, y;
+    dl:AddText(TP, col, s);
 end
 
 return T;

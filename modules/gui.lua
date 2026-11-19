@@ -14,13 +14,6 @@ local G = { open = { false } };
 local HEADER = { 1.0, 0.75, 0.55, 1.0 };
 local DIM    = { 0.70, 0.70, 0.75, 1.0 };
 
--- Commit-on-release. Absent in some older bindings: then save on every change.
-local ig_dae = imgui.IsItemDeactivatedAfterEdit;
-local function released(changed)
-    if (ig_dae) then return ig_dae(); end
-    return changed;
-end
-
 local function char_label()
     local name = settings.settings_path():match('([^\\]+)\\+$') or 'defaults';
     if (name == 'defaults') then return 'Not logged in: editing defaults'; end
@@ -47,15 +40,14 @@ local function slider(c, alias, label, key, lo, hi, fmt, is_int, hook)
         c[key] = n;
         if (hook) then hook(key); end
     end
-    if (released(changed)) then settings.save(alias); end
+    if (imgui.IsItemDeactivatedAfterEdit()) then settings.save(alias); end
 end
 
 -- InputInt typed into cfg live; clamp + save once on release.
 local function edit_int(c, defaults, label, key, lo, hi)
     local v = { c[key] };
-    local changed = imgui.InputInt(label, v);
-    if (changed) then c[key] = v[1]; end
-    if (not released(changed)) then return false; end
+    if (imgui.InputInt(label, v)) then c[key] = v[1]; end
+    if (not imgui.IsItemDeactivatedAfterEdit()) then return false; end
 
     local n = c[key];
     if (type(n) ~= 'number') then n = defaults[key]; end
@@ -72,26 +64,28 @@ local function reset(c, defaults, keep)
     end
 end
 
-local function tab_bar(c, bar)
-    local function hook() end
+-- Look keys live in bar.lua but belong to the Look tab: Reset bar defaults leaves them alone.
+local LOOK_KEYS = { theme = true, bar_style = true, bar_texture = true, bar_frame = true, panel_style = true,
+    panel_alpha = true };
 
+local function tab_bar(c, bar)
     local lk = { c.locked };
     if (imgui.Checkbox('Lock position (uncheck to drag)', lk)) then
         c.locked = lk[1];
         if (c.locked) then settings.save('bar'); else bar.force_handle(); end
     end
-    check(c, 'bar', 'Show distance', 'show_distance', hook);
-    check(c, 'bar', 'Show height offset (+ = target above you)', 'show_height', hook);
-    check(c, 'bar', 'Range colors account for hitbox size', 'dynamic_range', hook);
-    check(c, 'bar', 'Show menu recast info', 'show_menuinfo', hook);
-    check(c, 'bar', 'Show own pet HP bar', 'show_pet', hook);
-    check(c, 'bar', 'Show JA flash bar', 'show_jabar', hook);
-    check(c, 'bar', 'Show debuffs on the targeted mob', 'show_debuffs', hook);
-    check(c, 'bar', 'Debuffs below the HP bar (default: above)', 'debuffs_below', hook);
-    check(c, 'bar', 'Show treasure pool window (lots and passes per member)', 'show_pool', hook);
-    check(c, 'bar', 'Treasure pool: one-line summary by the party list (click it for the window)', 'pool_dock', hook);
-    slider(c, 'bar', 'Debuff icon size##thud_dbsz', 'debuff_icon', 12, 32, '%.0f', true, hook);
-    slider(c, 'bar', 'Hold finished cast / JA (s)##thud_linger', 'cast_linger', 0.5, 6.0, '%.1f', false, hook);
+    check(c, 'bar', 'Show distance', 'show_distance');
+    check(c, 'bar', 'Show height offset (+ = target above you)', 'show_height');
+    check(c, 'bar', 'Range colors account for hitbox size', 'dynamic_range');
+    check(c, 'bar', 'Show menu recast info', 'show_menuinfo');
+    check(c, 'bar', 'Show own pet HP bar', 'show_pet');
+    check(c, 'bar', 'Show JA flash bar', 'show_jabar');
+    check(c, 'bar', 'Show debuffs on the targeted mob', 'show_debuffs');
+    check(c, 'bar', 'Debuffs below the HP bar (default: above)', 'debuffs_below');
+    check(c, 'bar', 'Show treasure pool window (lots and passes per member)', 'show_pool');
+    check(c, 'bar', 'Treasure pool: one-line summary by the party list (click it for the window)', 'pool_dock');
+    slider(c, 'bar', 'Debuff icon size##thud_dbsz', 'debuff_icon', 12, 32, '%.0f', true);
+    slider(c, 'bar', 'Hold finished cast / JA (s)##thud_linger', 'cast_linger', 0.5, 6.0, '%.1f', false);
 
     imgui.Separator();
     imgui.TextColored(HEADER, 'Position (pixels)');
@@ -106,7 +100,7 @@ local function tab_bar(c, bar)
 
     imgui.Separator();
     if (imgui.Button('Reset bar defaults##thud_bar_reset')) then
-        reset(c, bar.defaults);
+        reset(c, bar.defaults, LOOK_KEYS);
         bar.set_cfg(c);
         settings.save('bar');
     end
@@ -218,7 +212,6 @@ end
 -- Colour presets: one button each, with a strip of its bar colours.
 local function swatch(c, w)
     local cx, cy = imgui.GetCursorScreenPos();
-    if (type(cx) == 'table') then cx, cy = cx.x, cx.y; end
     local dl = imgui.GetWindowDrawList();
     if (dl ~= nil) then
         dl:AddRectFilled({ cx, cy + 3 }, { cx + w, cy + 13 }, theme.u32(c[1], c[2], c[3]), 2.0);
@@ -252,16 +245,6 @@ local function tab_cursor(c, ring)
     check(c, 'ring', 'Spin (crystal)', 'cursor_spin');
 
     imgui.Separator();
-    imgui.TextColored(HEADER, 'Presets');
-    for i, p in ipairs(ring.CURSOR_PRESETS) do
-        if (i > 1) then imgui.SameLine(); end
-        if (imgui.Button(p[1] .. '##gui_cpre_' .. i)) then
-            c.cursor_style, c.cursor_color, c.cursor_sub = p[2], p[3], p[4];
-            settings.save('ring');
-        end
-    end
-
-    imgui.Separator();
     if (imgui.Button('Apply to all characters##gui_cursor_all')) then ring.cursor_apply_all(); end
     imgui.TextColored(DIM, 'Sends these settings to every character with /mss (MultiSend).');
     imgui.TextColored(DIM, 'Sub-target colour: your first target while you pick another,');
@@ -269,7 +252,7 @@ local function tab_cursor(c, ring)
     imgui.TextColored(DIM, 'Lift over players: clears the master level stars on their nameplate.');
 end
 
-local function tab_look(c)
+local function tab_look()
     imgui.TextColored(HEADER, 'Colour preset (bars, party list, AAEV)');
     -- two presets per row: [name][swatches]   [name][swatches]
     for i, name in ipairs(theme.PRESET_ORDER) do
@@ -359,7 +342,7 @@ function G.render(cfg, bar, ring, aaev, party)
         imgui.TextColored(HEADER, char_label());
         if (imgui.BeginTabBar('##thud_tabs', ImGuiTabBarFlags_NoCloseWithMiddleMouseButton)) then
             if (imgui.BeginTabItem('Look##thud_tab_look')) then
-                tab_look(bar_cfg);
+                tab_look();
                 imgui.EndTabItem();
             end
             if (party ~= nil and imgui.BeginTabItem('Party##thud_tab_party')) then

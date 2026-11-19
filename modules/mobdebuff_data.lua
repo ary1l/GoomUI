@@ -277,7 +277,7 @@ durations.ja = {
     [82] = {duration = 100, buffId = 168, uncertain = true}, -- Chi Blast - Inhibit TP only with Penance
     [131] = {duration = 90, buffId = 2}, -- Light Shot - Sleep
     [150] = {duration = 30, buffId = 805}, -- Tomahawk (silent client icon; not Defense Down 149)
-    [161] = {duration = 10, buffId = 28, uncertain = true}, -- Feral Howl - Terror    
+    [161] = {duration = 10, buffId = 28, uncertain = true}, -- Feral Howl - Terror
     [201] = {duration = 60, buffId = 386}, -- Quickstep - Lethargic Daze
     [202] = {duration = 60, buffId = 391}, -- Box Step - Sluggish Daze
     [203] = {duration = 60, buffId = 396}, -- Stutter Step - Weakened Daze

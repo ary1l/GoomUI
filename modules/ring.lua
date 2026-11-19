@@ -10,7 +10,8 @@ local ffi       = require('ffi');
 local settings  = require('settings');
 local theme     = require('modules/theme');  -- the target cursor's palette colours
 local C         = ffi.C;
-local unpack_bits = ashita.bits.unpack_be;
+local parse_action = require('modules/action');
+local ui        = require('modules/ui');
 local dev       = d3d.get_device();
 
 local M = { };
@@ -918,8 +919,7 @@ local function index_of(id)
         return guess;
     end
 
-    -- Full scan = 0x900 FFI calls. An id that missed within the last second is
-    -- not rescanned (every foreign 0x028 actor/target used to cost one).
+    -- Full scan = 0x900 FFI calls: an id that missed within the last second is not rescanned.
     local now = os.clock();
     local miss = geo.id_miss[id];
     if (miss ~= nil and now - miss < 1.0) then return nil; end
@@ -945,36 +945,21 @@ end
 local function has_buff(id)
     local buffs = AshitaCore:GetMemoryManager():GetPlayer():GetBuffs();
     if (buffs == nil) then return false; end
-
-    -- The buff array surfaces as either a 0-based cdata block or a 1-based
-    -- table depending on the binding, so both ends are checked.
-    for i = 0, 32 do
-        if (buffs[i] == id) then return true; end
+    for _, b in pairs(buffs) do
+        if (b == id) then return true; end
     end
-
     return false;
 end
 
 local function spell_name(id)
     local res = AshitaCore:GetResourceManager():GetSpellById(id);
-    if (res == nil) then return nil; end
-
-    for i = 1, 3 do
-        local ok, n = pcall(function () return res.Name[i]; end);
-        if (ok and type(n) == 'string' and #n > 0) then return n; end
-    end
-
-    return nil;
+    local n = (res ~= nil) and res.Name[1] or nil;
+    return (n ~= nil and n ~= '') and n or nil;
 end
 
 local function spell_element(id)
     local res = AshitaCore:GetResourceManager():GetSpellById(id);
-    if (res == nil) then return nil; end
-
-    local ok, e = pcall(function () return res.Element; end);
-    if (ok and type(e) == 'number') then return e; end
-
-    return nil;
+    return (res ~= nil) and res.Element or nil;
 end
 
 --------------------------------------------------------------------------------
@@ -1240,10 +1225,6 @@ local function ring_party_near(ent, origin, radius, marked)
     end
 end
 
-local function build_buff_rings(ent, luopan, radius, marked)
-    ring_party_near(ent, luopan, radius, marked);
-end
-
 -- Indi- sits on the caster, Entrust on its target; neither follows the luopan.
 local function build_indi_rings(ent, marked)
     if (geo.indi_id ~= nil and geo.indi_buff) then
@@ -1339,12 +1320,8 @@ function dur.desc_flat(id)
     local res = AshitaCore:GetResourceManager():GetItemById(id);
     if (res == nil) then return 0, 0; end
 
-    local text = nil;
-    for i = 1, 3 do
-        local ok, d = pcall(function () return res.Description[i]; end);
-        if (ok and type(d) == 'string' and #d > 0) then text = d; break; end
-    end
-    if (text == nil) then return 0, 0; end
+    local text = res.Description[1];
+    if (text == nil or text == '') then return 0, 0; end
 
     local flat, pct = 0, 0;
     for n, mark in text:lower():gmatch('indicolure[^%+\r\n]-duration[%s"]*%+(%d+)(%%?)') do
@@ -1597,7 +1574,7 @@ local function update_geo()
 
     if (geo.is_buff) then
         if (cfg.geo_buffs) then
-            build_buff_rings(ent, luopan, radius, marked);
+            ring_party_near(ent, luopan, radius, marked);
         end
         geo.status = ('buff %s r%.1f'):fmt(geo.spell or 'bubble', radius);
     else
@@ -1662,48 +1639,16 @@ end
 --------------------------------------------------------------------------------
 -- GEO bubble rings -- packets
 --------------------------------------------------------------------------------
--- 0x028 action packet (XiPackets GP_SERV_COMMAND_BATTLE2, Reversing.md).
--- Read straight off data_raw: the bitreader lib hex-encoded and re-parsed the
--- whole packet for every action in the zone. Only actor, category, param, the
--- target ids and the first result value are used, so each result is skipped by
--- its fixed width (miss 3, kind 2, sub_kind 12, info 5, scale 5, value 17,
--- message 10, bit 31 = 85) plus the optional proc (37) and react (34) blocks.
-local function parse_action(e)
-    local raw = e.data_raw;
-    local max = e.size * 8;
-    if (max < 150) then return nil; end
-
-    local act = { };
-    act.actor = unpack_bits(raw, 0, 40, 32);
-    local target_count = unpack_bits(raw, 0, 72, 6);
-    act.category = unpack_bits(raw, 0, 82, 4);
-    act.param = unpack_bits(raw, 0, 86, 32);
-
-    local pos = 150;                    -- past info (32)
-    act.targets = { };
-    for t = 1, target_count do
-        if (pos + 36 > max) then return nil; end
-        act.targets[t] = unpack_bits(raw, 0, pos, 32);
-        local results = unpack_bits(raw, 0, pos + 32, 4);
-        pos = pos + 36;
-
-        for _ = 1, results do
-            if (pos + 87 > max) then return nil; end
-            if (act.value == nil) then act.value = unpack_bits(raw, 0, pos + 27, 17); end
-            pos = pos + 85;
-
-            local has_proc = unpack_bits(raw, 0, pos, 1);
-            pos = pos + 1;
-            if (has_proc ~= 0) then pos = pos + 37; end
-
-            if (pos + 1 > max) then return nil; end
-            local has_react = unpack_bits(raw, 0, pos, 1);
-            pos = pos + 1;
-            if (has_react ~= 0) then pos = pos + 34; end
-        end
+-- 0x028 (modules/action.lua): only actor, category, param, the target ids and the first result value are used.
+local function action_view(e)
+    local a = parse_action(e);
+    if (a == nil) then return nil; end
+    local ids, value = { }, nil;
+    for t, tg in ipairs(a.targets) do
+        ids[t] = tg.id;
+        if (value == nil and tg.results[1] ~= nil) then value = tg.results[1].value; end
     end
-
-    return act;
+    return { actor = a.actor, category = a.category, param = a.param, targets = ids, value = value };
 end
 
 -- Remember which mobs already have a given ally on their hate list, so a Cure
@@ -1745,9 +1690,7 @@ local function apply_action_tags(act)
         spell_id = act.value;
     end
     local name = (spell_id ~= nil) and spell_name(spell_id) or nil;
-    -- Only party / alliance geomancers (self included) own bubbles. An outside
-    -- GEO's Geo-/Indi-/Entrust used to become 'the geomancer to watch' and draw
-    -- (or recolour) bubbles for people not in the group.
+    -- Only party / alliance geomancers (self included) own bubbles; an outside GEO's casts are ignored.
     local ally_cast = geo.party_ids[act.actor] == true;
     local is_geo_spell = ally_cast and (name ~= nil) and (name:sub(1, 4) == 'Geo-');
     local is_indi = ally_cast and (name ~= nil) and (name:sub(1, 5) == 'Indi-');
@@ -1921,7 +1864,7 @@ function M.packet_in(e)
     if (not cfg.geo) then return; end
 
     if (e.id == 0x028) then
-        local ok, act = pcall(parse_action, e);
+        local ok, act = pcall(action_view, e);
         if (ok and act ~= nil) then
             pcall(apply_action_tags, act);
         end
@@ -1995,53 +1938,19 @@ end
 --------------------------------------------------------------------------------
 -- Visibility
 --------------------------------------------------------------------------------
--- The client's own "interface is hidden" flag; it covers the UI toggle and the
--- letterboxed part of cutscenes. Ashita's pointer manager has no entry for it
--- (the old Get('gInterfaceHidden') always returned 0), so scan for it the way
--- HXUI does: mov ecx, <object> at +10, flag byte at object + 0xB4.
-local INTERFACE_HIDDEN = ashita.memory.find('FFXiMain.dll', 0,
-    '8B4424046A016A0050B9????????E8????????F6D81BC040C3', 0, 0);
-
-local function interface_hidden()
-    if (INTERFACE_HIDDEN == nil or INTERFACE_HIDDEN == 0) then return false; end
-
-    local ptr = ashita.memory.read_uint32(INTERFACE_HIDDEN + 10);
-    if (ptr == 0) then return false; end
-
-    return ashita.memory.read_uint8(ptr + 0xB4) == 1;
-end
-
--- Name of the menu that currently holds focus, if any.
-local function menu_name()
-    local ptr = AshitaCore:GetPointerManager():Get('menu');
-    if (ptr == nil or ptr == 0) then return nil; end
-
-    ptr = ashita.memory.read_uint32(ptr);
-    if (ptr == 0) then return nil; end
-
-    ptr = ashita.memory.read_uint32(ptr);
-    if (ptr == 0) then return nil; end
-
-    ptr = ashita.memory.read_uint32(ptr + 0x04);
-    if (ptr == 0) then return nil; end
-
-    return ashita.memory.read_string(ptr + 0x46, 16);
-end
-
 local ui_memo = { name = nil, blocked = false };
 
+-- Hidden interface, the map, or the expanded chat log (both take focus as menus).
 local function ui_blocks_rings()
-    if (interface_hidden()) then return true; end
+    if (ui.hidden()) then return true; end
 
-    local name = menu_name();
-    if (type(name) ~= 'string' or #name == 0) then return false; end
+    local name = ui.menu();
+    if (name == '') then return false; end
 
-    -- Same menu as last frame: reuse verdict, skip lower() + 3 finds.
+    -- Same menu as last frame: reuse the verdict.
     if (name == ui_memo.name) then return ui_memo.blocked; end
 
     local low = name:lower();
-
-    -- Map, and the expanded chat log, both take focus as menus.
     local blocked = low:find('map', 1, true) ~= nil
         or low:find('log', 1, true) ~= nil
         or low:find('chat', 1, true) ~= nil;
@@ -2061,13 +1970,6 @@ end
 M.CURSOR_COLORS = { 'white', 'kind', 'hp_full', 'hp_50', 'hp_0', 'mp', 'tp', 'tp_rdy', 'tp_max', 'spell', 'item',
     'hit', 'crit', 'ws', 'heal', 'counter', 'r3' };
 M.CURSOR_STYLES = { 'gem', 'flat', 'hollow', 'crystal' };
--- One-click looks: name, style, colour, sub-target colour.
-M.CURSOR_PRESETS = {
-    { 'goomui',  'gem',     'mp',    'tp_rdy' },
-    { 'Classic', 'gem',     'white', 'mp' },     -- white, blue when picking (customtarget's colours)
-    { 'Crystal', 'crystal', 'mp',    'tp_rdy' },
-    { 'Minimal', 'hollow',  'white', 'mp' },
-};
 local CUR_W, CUR_H = 30, 20;    -- the box at size 1 (customtarget's cursor)
 local CUR_R      = 4.5;         -- corner radius of the outer edge
 local CUR_BORDER = 1.8;         -- light border, then a dark ring, then the core (px at size 1)
@@ -2252,9 +2154,9 @@ local function draw_gem(bx, by, s, c, facets)
     cursor_fringe(cur.border, bx, by, s, border, 1);
     cursor_fan(cur.ring, cx, cy, bx, by, s, ring);
     cursor_fringe(cur.ring, bx, by, s, ring, 1);
-    local C, N = cur.corners, cur.normals;
+    local K, N = cur.corners, cur.normals;
     for _, f in ipairs(facets) do
-        local a, b = C[f[1]], C[f[2]];
+        local a, b = K[f[1]], K[f[2]];
         local ax, ay, qx, qy = bx + a[1] * s, by + a[2] * s, bx + b[1] * s, by + b[2] * s;
         local co, ca, cb = cursor_tint(c, f[3], 0xFF), cursor_tint(c, f[4], 0xFF), cursor_tint(c, f[5], 0xFF);
         local nx, ny = math.cos(N[f[1]]) * CUR_FRINGE, math.sin(N[f[1]]) * CUR_FRINGE;
@@ -2386,19 +2288,20 @@ function M.render()
 
     local index = 0;
     local index_sub = nil;
-    local first = nil;  -- the first target while sub-targeting (its cursor shows even when it is the one picked)
+    local first = nil;  -- the held target while sub-targeting (its cursor shows even when it is the one picked)
     local pick = false; -- an item / <stnpc> / <stpc> pick, not sub-targeting: the cursor takes the sub colour
 
     if (cfg.enabled or want_cursor) then
+        -- Ashita libs/ffxi/targets.lua: while sub-targeting, slot 0 is the pick (<st>) and slot 1 the held <t>.
         local target = mm:GetTarget();
-        local is_sub = target:GetIsSubTargetActive();
-        if (target:GetIsActive(is_sub) ~= 0) then
-            index = target:GetTargetIndex(is_sub);
-            if (is_sub == 1) then
-                first = target:GetTargetIndex(0);
-                if (first == 0) then first = nil; end
-                if (first ~= index) then index_sub = first; end
-            elseif (want_cursor) then
+        if (target:GetIsSubTargetActive() == 1) then
+            index = target:GetTargetIndex(0);
+            first = target:GetTargetIndex(1);
+            if (first == 0) then first = nil; end
+            if (first ~= nil and first ~= index) then index_sub = first; end
+        elseif (target:GetIsActive(0) ~= 0) then
+            index = target:GetTargetIndex(0);
+            if (want_cursor) then
                 local f = target:GetSubTargetFlags();
                 pick = (f == 512 or f == 18 or f == 525);
             end
@@ -2481,7 +2384,7 @@ local function one_of(list, v)
     return false;
 end
 
--- /goomui cursor [on|off | style <s> | color|sub <c> | size <n> | float|spin [on|off] | lift <px> | preset <name>
+-- /goomui cursor [on|off | style <s> | color|sub <c> | size <n> | float|spin [on|off] | lift <px>
 --   | set <on|off> <style> <colour> <sub> <size> <float on|off> <spin on|off> [lift]]   (set: all at once, Apply to all)
 function M.cursor_command(args)
     local opt = (#args >= 3) and args[3]:lower() or nil;
@@ -2491,7 +2394,7 @@ function M.cursor_command(args)
         return not now;
     end
     if (opt == nil) then
-        cfg.cursor = not (cfg.cursor ~= false);
+        cfg.cursor = (cfg.cursor == false);
     elseif (opt == 'on' or opt == 'off') then
         cfg.cursor = (opt == 'on');
     elseif (opt == 'style') then
@@ -2514,14 +2417,6 @@ function M.cursor_command(args)
         cfg.cursor_float = flag(cfg.cursor_float);
     elseif (opt == 'spin') then
         cfg.cursor_spin = flag(cfg.cursor_spin);
-    elseif (opt == 'preset') then
-        local hit, names = nil, { };
-        for _, p in ipairs(M.CURSOR_PRESETS) do
-            if (p[1]:lower() == val) then hit = p; end
-            names[#names + 1] = p[1]:lower();
-        end
-        if (hit == nil) then print('goomui cursor presets: ' .. table.concat(names, ' ')); return; end
-        cfg.cursor_style, cfg.cursor_color, cfg.cursor_sub = hit[2], hit[3], hit[4];
     elseif (opt == 'set' and #args >= 10) then
         local v = { };
         for i = 4, 10 do v[i] = args[i]:lower(); end
@@ -2537,8 +2432,7 @@ function M.cursor_command(args)
             cfg.cursor_lift = math.max(0, math.min(40, math.floor(tonumber(args[11]) + 0.5)));
         end
     else
-        print('/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | lift <px>'
-            .. ' | preset <name>');
+        print('/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | lift <px>');
         return;
     end
     settings.save('ring');
