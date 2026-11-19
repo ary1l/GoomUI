@@ -1145,6 +1145,7 @@ end
 local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, menu_text, bar_width, show_distance, show_height)
     local panel_col, accent = panel_colors(data, force_blue)
     local opened, dl, win_h = begin_panel(win_id, pos_x, pos_y, panel_col, accent)
+    local npc_pad = 0
     if opened then
         local base = imgui.GetCursorPosX()
         imgui.SetCursorPosX(base + PANEL_PADDING)
@@ -1176,6 +1177,7 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
 
         -- Name is last on the line, so the cursor already accounts for the
         -- distance / height / HP / menu-hint prefixes: fit to what is left.
+        local line_y = imgui.GetCursorPosY()
         imgui.TextColored(data.name_color,
             fit_text(data.display_name, base + bar_width - imgui.GetCursorPosX()))
 
@@ -1183,15 +1185,18 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
         local cx, cy = imgui.GetCursorScreenPos()
         if not is_sub then rcache.bar_dx = cx - pos_x end
 
-        -- Non-mob NPCs have no HP to show: name line only, no empty bar.
-        if not data.is_real_npc then
+        -- Non-mob NPCs have no HP to show: name line only, no empty bar. npc_pad = the height the bar row
+        -- would have taken (bar + item spacing), so the docked chart under main does not jump.
+        if data.is_real_npc then
+            npc_pad = bar_h + math.max(0, imgui.GetCursorPosY() - line_y - imgui.GetFontSize())
+        else
             v_size[1], v_size[2] = bar_width, bar_h
             imgui.Dummy(v_size)
             if dl then theme.bar(dl, cx, cy, bar_width, bar_h, data.hp_frac, data.bar_color) end
         end
     end
     imgui.End()
-    return win_h
+    return win_h, npc_pad
 end
 
 -- Debuffs on a mob target: their own row on its target panel, in that panel's colours (force_blue as the panel
@@ -1702,8 +1707,9 @@ function M.render()
     if main_data then
         -- Blue = the target being picked: the sub panel while sub-targeting, else main when a target menu is up.
         local force_blue = (sub_data == nil) and (last_menu_text ~= '')
-        rcache.h_main = draw_bar(main_data, '##thud_main', px, y,
-            bh, false, force_blue, last_menu_text, bw, cfg.show_distance, cfg.show_height) or rcache.h_main
+        local mh, npc_pad = draw_bar(main_data, '##thud_main', px, y,
+            bh, false, force_blue, last_menu_text, bw, cfg.show_distance, cfg.show_height)
+        rcache.h_main = mh and (mh + npc_pad) or rcache.h_main
         if debuff_shown(main_data) then
             if below then
                 draw_debuff_row(main_data, px, y + rcache.h_main, bw, '##thud_debuff', 'h_debuff', force_blue)
