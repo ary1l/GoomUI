@@ -269,7 +269,7 @@ local function refresh_managers()
     mgr.entity = mm:GetEntity()
 end
 
-local rcache = { bw = 400, bh = 14, win_w = 0, sub_bh = 0, h_main = 32, h_sub = 24, h_cast = 28, h_ja = 22, h_menu = 28, h_debuff = 30, h_debuff_sub = 30, bar_dx = 12 }
+local rcache = { bw = 400, bh = 14, win_w = 0, h_main = 32, h_sub = 24, h_cast = 28, h_ja = 22, h_menu = 28, h_debuff = 30, h_debuff_sub = 30, bar_dx = 12 }
 
 -- The GUI writes bar_width/bar_height live while a value is being typed; draw
 -- with clamped copies so a half-typed '1' or '-' never reaches Dummy/AddRect.
@@ -277,7 +277,6 @@ local function update_rcache()
     rcache.bw     = math.max(100, math.min(800, tonumber(cfg.bar_width)  or 400))
     rcache.bh     = math.max(6,   math.min(48,  tonumber(cfg.bar_height) or 14))
     rcache.win_w  = rcache.bw + 16
-    rcache.sub_bh = math.max(2, math.floor(rcache.bh * 0.5))
 end
 
 ------------------------------------------------------------
@@ -1015,7 +1014,7 @@ local function apply_hp(cache, hp_pct)
                     or HP_COLOR_LUT[math.max(0, math.min(100, hp_pct))]
 end
 
-local function parse_target_data(tIdx, out_cache, force_sub_brackets, entity, targ)
+local function parse_target_data(tIdx, out_cache, _, entity, targ)
     if not tIdx or tIdx == 0 then return nil end
 
     local cur_name = entity:GetName(tIdx) or 'Unknown'
@@ -1064,12 +1063,13 @@ local function parse_target_data(tIdx, out_cache, force_sub_brackets, entity, ta
         end
     end
 
-    -- Lock-on brackets only for the locked (main) target, not for a cast target picked while locked on.
-    local is_locked = force_sub_brackets
-    if not force_sub_brackets then
-        local lf = targ and targ:GetLockedOnFlags()
-        is_locked = (lf ~= nil) and (bit.band(lf, 0x01) ~= 0)
-                    and targ:GetTargetIndex(0) == tIdx or false
+    -- Lock-on brackets only for the locked (held <t>) target, not for a cast target picked while locked on.
+    -- Ashita libs/ffxi/targets.lua: while sub-targeting, slot 0 is the pick (<st>) and slot 1 the held <t>.
+    local is_locked = false
+    if targ then
+        local lf   = targ:GetLockedOnFlags()
+        local held = (targ:GetIsSubTargetActive() ~= 0) and targ:GetTargetIndex(1) or targ:GetTargetIndex(0)
+        is_locked  = (lf ~= nil) and (bit.band(lf, 0x01) ~= 0) and held == tIdx
     end
 
     if out_cache.raw_name ~= cur_name or out_cache.is_locked ~= is_locked then
@@ -1145,10 +1145,11 @@ end
 local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, menu_text, bar_width, show_distance, show_height)
     local panel_col, accent = panel_colors(data, force_blue)
     local opened, dl, win_h = begin_panel(win_id, pos_x, pos_y, panel_col, accent)
+    local npc_pad = 0
     if opened then
         local base = imgui.GetCursorPosX()
         imgui.SetCursorPosX(base + PANEL_PADDING)
-        if not is_sub then imgui.SetCursorPosY(imgui.GetCursorPosY() + TOP_PADDING) end
+        imgui.SetCursorPosY(imgui.GetCursorPosY() + TOP_PADDING)
 
         if show_distance and not data.is_self then
             imgui.TextColored(data.dist_color, data.dist_str)
@@ -1176,23 +1177,26 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
 
         -- Name is last on the line, so the cursor already accounts for the
         -- distance / height / HP / menu-hint prefixes: fit to what is left.
+        local line_y = imgui.GetCursorPosY()
         imgui.TextColored(data.name_color,
             fit_text(data.display_name, base + bar_width - imgui.GetCursorPosX()))
 
         imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
         local cx, cy = imgui.GetCursorScreenPos()
-
-        v_size[1], v_size[2] = bar_width, bar_h
-        imgui.Dummy(v_size)
-
         if not is_sub then rcache.bar_dx = cx - pos_x end
-        if dl then
-            theme.bar(dl, cx, cy, bar_width, bar_h,
-                (not data.is_real_npc) and data.hp_frac or 0, data.bar_color)
+
+        -- Non-mob NPCs have no HP to show: name line only, no empty bar. npc_pad = the height the bar row
+        -- would have taken (bar + item spacing), so the docked chart under main does not jump.
+        if data.is_real_npc then
+            npc_pad = bar_h + math.max(0, imgui.GetCursorPosY() - line_y - imgui.GetFontSize())
+        else
+            v_size[1], v_size[2] = bar_width, bar_h
+            imgui.Dummy(v_size)
+            if dl then theme.bar(dl, cx, cy, bar_width, bar_h, data.hp_frac, data.bar_color) end
         end
     end
     imgui.End()
-    return win_h
+    return win_h, npc_pad
 end
 
 -- Debuffs on a mob target: their own row on its target panel, in that panel's colours (force_blue as the panel
@@ -1633,10 +1637,12 @@ function M.render()
     local entity   = mgr.entity
 
     if targ and entity then
-        local main_idx = targ:GetTargetIndex(0)
-        local sub_idx
+        -- Ashita libs/ffxi/targets.lua: while sub-targeting, slot 0 is the pick (<st>) and slot 1 the held <t>.
+        -- Main panel = held <t>, sub panel = the <st> pick.
         local sub_raw         = targ:GetIsSubTargetActive()
-        local current_sub_idx = targ:GetTargetIndex(1)
+        local main_idx        = (sub_raw ~= 0) and targ:GetTargetIndex(1) or targ:GetTargetIndex(0)
+        local current_sub_idx = (sub_raw ~= 0) and targ:GetTargetIndex(0) or 0
+        local sub_idx
         if sub_raw ~= 0 and current_sub_idx ~= 0 then
             sub_target_persistence = current_sub_idx
             sub_target_expires     = now + 2.0
@@ -1699,9 +1705,11 @@ function M.render()
     rcache.h_below = 0
 
     if main_data then
-        local force_blue = (sub_data ~= nil) or (last_menu_text ~= '')
-        rcache.h_main = draw_bar(main_data, '##thud_main', px, y,
-            bh, false, force_blue, last_menu_text, bw, cfg.show_distance, cfg.show_height) or rcache.h_main
+        -- Blue = the target being picked: the sub panel while sub-targeting, else main when a target menu is up.
+        local force_blue = (sub_data == nil) and (last_menu_text ~= '')
+        local mh, npc_pad = draw_bar(main_data, '##thud_main', px, y,
+            bh, false, force_blue, last_menu_text, bw, cfg.show_distance, cfg.show_height)
+        rcache.h_main = mh and (mh + npc_pad) or rcache.h_main
         if debuff_shown(main_data) then
             if below then
                 draw_debuff_row(main_data, px, y + rcache.h_main, bw, '##thud_debuff', 'h_debuff', force_blue)
@@ -1730,14 +1738,14 @@ function M.render()
         end
         y = y - rcache.h_sub
         rcache.h_sub = draw_bar(sub_data, '##thud_sub', px, y,
-            rcache.sub_bh, true, false, nil, bw, cfg.show_distance, cfg.show_height) or rcache.h_sub
+            bh, true, true, last_menu_text, bw, cfg.show_distance, cfg.show_height) or rcache.h_sub
         if sub_db then
             if not below then
                 y = y - rcache.h_debuff_sub
                 db_top = y
                 y = y - DEBUFF_GAP
             end
-            draw_debuff_row(sub_data, px, db_top, bw, '##thud_debuff_sub', 'h_debuff_sub', false)
+            draw_debuff_row(sub_data, px, db_top, bw, '##thud_debuff_sub', 'h_debuff_sub', true)
         end
     end
 
