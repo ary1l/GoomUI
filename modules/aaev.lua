@@ -11,6 +11,15 @@ local slib  = require('settings');
 local data  = require('modules/aaev_data');
 local theme = require('modules/theme');
 local parse_action = require('modules/action');
+
+-- Ashita's ImGui (1.92.3) binding has no SetWindowFontScale: the text keeps its size and
+-- the fit logic falls back to dropping cells. IsItemDeactivatedAfterEdit: commit on release where bound.
+local font_scale_ok = imgui.SetWindowFontScale ~= nil;
+local set_font_scale = imgui.SetWindowFontScale or function () end;
+local function released(changed)
+    if (imgui.IsItemDeactivatedAfterEdit ~= nil) then return imgui.IsItemDeactivatedAfterEdit(); end
+    return changed;
+end
 local scaling = require('scaling');
 
 local M = { };
@@ -1377,7 +1386,7 @@ local function draw_chart(log_type)
             -- Fit: widest cell x cell count must fit the chart width.
             local scale = settings.FontScale or 1.0;
             if (settings.AutoFitLabels) then
-                imgui.SetWindowFontScale(1.0);
+                set_font_scale(1.0);
                 for _, row in ipairs({ g1, g2 }) do
                     local need = 0;
                     for _, c in ipairs(row) do need = need + (imgui.CalcTextSize(cell_text(c)) or 0); end
@@ -1388,7 +1397,7 @@ local function draw_chart(log_type)
                 end
             end
             -- Real widths at the scale actually drawn.
-            imgui.SetWindowFontScale(scale);
+            set_font_scale(scale);
             measure_row(g1);
             measure_row(g2);
             lc.top, lc.bot, lc.scale, lc.grid = g1, g2, scale, true;
@@ -1409,7 +1418,7 @@ local function draw_chart(log_type)
             local scale = settings.FontScale or 1.0;
             if (settings.AutoFitLabels and not settings.WidthFromLabels) then
                 -- Measure at 1.0.
-                imgui.SetWindowFontScale(1.0);
+                set_font_scale(1.0);
                 local widest = 0;
                 for _, row in ipairs({ top_row, bot_row }) do
                     if (#row > 0) then
@@ -1428,7 +1437,7 @@ local function draw_chart(log_type)
             lc.tlog, lc.v, lc.zv, lc.cv = tlog, tlog.v, zv, ver.cfg;
         end
         local top_row, bot_row = lc.top, lc.bot;
-        imgui.SetWindowFontScale(lc.scale);
+        set_font_scale(lc.scale);
 
         imgui.BeginGroup();
 
@@ -1540,7 +1549,7 @@ local function draw_strip(log_type)
             local avail = strip.w - strip.bw - 2 * strip.pad[1] - 10;
             local scale = settings.FontScale or 1.0;
             -- Shrink a little for width (not below 0.85: stays readable); then drop cells.
-            imgui.SetWindowFontScale(1.0);
+            set_font_scale(1.0);
             local need = 0;
             for _, c in ipairs(cells) do
                 local t = (c.l == 'WS') and 'WS Wwwwwwwwwwww 99999' or cell_text(c);
@@ -1550,7 +1559,7 @@ local function draw_strip(log_type)
             if (need > 0 and avail > gaps and need * scale + gaps > avail) then
                 scale = math.max(0.85, (avail - gaps) / need);
             end
-            imgui.SetWindowFontScale(scale);
+            set_font_scale(scale);
             local _, lh = imgui.CalcTextSize('Hg');
             lc.text_y = math.max(0, math.floor((strip.h - (lh or 0)) / 2));
             measure_row(cells);
@@ -1567,7 +1576,7 @@ local function draw_strip(log_type)
             lc.cells, lc.scale, lc.avail = cells, scale, avail;
             lc.tlog, lc.v, lc.zv, lc.cv, lc.w, lc.h = tlog, tlog.v, zv, ver.cfg, strip.w, strip.h;
         end
-        imgui.SetWindowFontScale(lc.scale);
+        set_font_scale(lc.scale);
 
         -- bars (vertically centred), then the cells; SameLine offsets are from the window's left edge
         imgui.SetCursorPosY(math.floor((strip.h - strip.bh) / 2));
@@ -1793,7 +1802,7 @@ local function cfg_int(label, key, lo, hi)
     local changed = imgui.InputInt(label, buf.v);
     if (changed) then buf.editing = true; end
 
-    if (not imgui.IsItemDeactivatedAfterEdit()) then return false; end
+    if (not released(changed)) then return false; end
 
     buf.editing = false;
     local n = math.floor(tonumber(buf.v[1]) or cur);
@@ -1936,7 +1945,7 @@ local function tab_layout()
             'ChartBars', 1, 100);
     cfg_check('Let labels widen the window', 'WidthFromLabels');
     if (not settings.WidthFromLabels) then
-        cfg_check('Shrink label text to fit the width', 'AutoFitLabels');
+        if (font_scale_ok) then cfg_check('Shrink label text to fit the width', 'AutoFitLabels'); end
     end
 
     imgui.Separator();
@@ -1946,7 +1955,7 @@ local function tab_layout()
     if (settings.BGDisplay) then
         cfg_slider('  Background alpha', 'BGAlpha', 0, 255);
     end
-    cfg_float('Font scale', 'FontScale', 0.5, 3.0);
+    if (font_scale_ok) then cfg_float('Font scale', 'FontScale', 0.5, 3.0); end
 end
 
 local function tab_stats()

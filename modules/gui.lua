@@ -29,6 +29,12 @@ local function check(c, alias, label, key, hook)
     end
 end
 
+-- Commit on release where the binding has IsItemDeactivatedAfterEdit, else on every change.
+local function released(changed)
+    if (imgui.IsItemDeactivatedAfterEdit ~= nil) then return imgui.IsItemDeactivatedAfterEdit(); end
+    return changed;
+end
+
 -- SliderFloat for ints too (format %.0f + floor): no reliance on SliderInt.
 local function slider(c, alias, label, key, lo, hi, fmt, is_int, hook)
     local v = { c[key] };
@@ -40,14 +46,15 @@ local function slider(c, alias, label, key, lo, hi, fmt, is_int, hook)
         c[key] = n;
         if (hook) then hook(key); end
     end
-    if (imgui.IsItemDeactivatedAfterEdit()) then settings.save(alias); end
+    if (released(changed)) then settings.save(alias); end
 end
 
 -- InputInt typed into cfg live; clamp + save once on release.
 local function edit_int(c, defaults, label, key, lo, hi)
     local v = { c[key] };
-    if (imgui.InputInt(label, v)) then c[key] = v[1]; end
-    if (not imgui.IsItemDeactivatedAfterEdit()) then return false; end
+    local changed = imgui.InputInt(label, v);
+    if (changed) then c[key] = v[1]; end
+    if (not released(changed)) then return false; end
 
     local n = c[key];
     if (type(n) ~= 'number') then n = defaults[key]; end
