@@ -1181,14 +1181,13 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
 
         imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
         local cx, cy = imgui.GetCursorScreenPos()
-
-        v_size[1], v_size[2] = bar_width, bar_h
-        imgui.Dummy(v_size)
-
         if not is_sub then rcache.bar_dx = cx - pos_x end
-        if dl then
-            theme.bar(dl, cx, cy, bar_width, bar_h,
-                (not data.is_real_npc) and data.hp_frac or 0, data.bar_color)
+
+        -- Non-mob NPCs have no HP to show: name line only, no empty bar.
+        if not data.is_real_npc then
+            v_size[1], v_size[2] = bar_width, bar_h
+            imgui.Dummy(v_size)
+            if dl then theme.bar(dl, cx, cy, bar_width, bar_h, data.hp_frac, data.bar_color) end
         end
     end
     imgui.End()
