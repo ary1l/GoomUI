@@ -471,10 +471,12 @@ function T.set_panel(style, alpha)
 end
 
 -- UI scale (0.5 - 3): one multiplier for goomui's text and pixel sizes, for small or high-DPI screens.
--- Text: ImGui 1.92 multiplies every font size by style.FontScaleMain when a window begins (Begin ->
--- SetCurrentWindow -> UpdateCurrentFontSize), so goomui sets it around its own draws and restores it after:
--- other addons keep their size. A 1x1 hidden window is begun after each change so the current font size
--- (used by CalcTextSize outside a window) follows too. Pixel sizes: modules multiply by T.ui_scale (T.px).
+-- Text: ImGui 1.92's PushFont(font, size) sets the base font size and recomputes the current size at once
+-- (imgui.cpp PushFont -> SetCurrentFont -> UpdateCurrentFontSize); Begin keeps it, PopFont restores it. So
+-- goomui pushes base * scale around its own draws and other addons keep their size. Same call XIUI uses for
+-- its config window (XIUI.lua PushChromeFont), gated the same way: Ashita 4.3 (ImGui 1.92) exposes a numeric
+-- style.FontSizeBase; older builds have no size argument, so text stays unscaled there.
+-- Pixel sizes: modules multiply by T.ui_scale (T.px).
 T.ui_scale = 1.0;
 function T.set_ui_scale(v)
     v = tonumber(v) or 1.0;
@@ -482,32 +484,21 @@ function T.set_ui_scale(v)
 end
 function T.px(n) return floor(n * T.ui_scale + 0.5); end
 
-local FS_POS, FS_SIZE = { -100, -100 }, { 1, 1 };
-local FS_FLAGS = nil;
-local function fs_refresh()
-    if (FS_FLAGS == nil) then
-        FS_FLAGS = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_NoInputs, ImGuiWindowFlags_NoBackground,
-            ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav);
-    end
-    imgui.SetNextWindowPos(FS_POS, ImGuiCond_Always);
-    imgui.SetNextWindowSize(FS_SIZE, ImGuiCond_Always);
-    imgui.Begin('##goomui_fontscale', true, FS_FLAGS);
-    imgui.End();
-end
-local fs_saved = nil;
+local font_size_ok = nil;   -- Ashita 4.3+: PushFont takes a size
+local font_pushed = false;
 -- Wrap every goomui draw (d3d_present) in these two. No-ops at scale 1.
 function T.scale_begin()
-    if (T.ui_scale == 1.0 or fs_saved ~= nil) then return; end
+    if (T.ui_scale == 1.0 or font_pushed) then return; end
     local st = imgui.GetStyle();
-    fs_saved = st.FontScaleMain or 1.0;
-    st.FontScaleMain = fs_saved * T.ui_scale;
-    fs_refresh();
+    if (font_size_ok == nil) then font_size_ok = (st ~= nil and type(st.FontSizeBase) == 'number'); end
+    if (not font_size_ok) then return; end
+    imgui.PushFont(imgui.GetFont(), floor(st.FontSizeBase * T.ui_scale + 0.5));
+    font_pushed = true;
 end
 function T.scale_end()
-    if (fs_saved == nil) then return; end
-    imgui.GetStyle().FontScaleMain = fs_saved;
-    fs_saved = nil;
-    fs_refresh();
+    if (not font_pushed) then return; end
+    imgui.PopFont();
+    font_pushed = false;
 end
 
 -- Alpha byte times m (imgui U32 and sprite ARGB both keep alpha in the top byte).
