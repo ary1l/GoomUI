@@ -12,6 +12,7 @@
 
 require('common');
 local imgui = require('imgui');
+local crumb = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
 
 local T = { };
 local floor = math.floor;
@@ -492,12 +493,16 @@ function T.scale_begin()
     local st = imgui.GetStyle();
     if (font_size_ok == nil) then font_size_ok = (st ~= nil and type(st.FontSizeBase) == 'number'); end
     if (not font_size_ok) then return; end
+    crumb.sub('ui scale: font push');
     imgui.PushFont(imgui.GetFont(), floor(st.FontSizeBase * T.ui_scale + 0.5));
+    crumb.back();
     font_pushed = true;
 end
 function T.scale_end()
     if (not font_pushed) then return; end
+    crumb.sub('ui scale: font pop');
     imgui.PopFont();
+    crumb.back();
     font_pushed = false;
 end
 
