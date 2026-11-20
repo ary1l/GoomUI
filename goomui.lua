@@ -15,6 +15,7 @@ local party    = require('modules/party');   -- registers its own draw / packet 
 local theme    = require('modules/theme');
 local mobdebuff = require('modules/mobdebuff');
 local pool     = require('modules/pool');
+local crumb    = require('modules/crumb');  -- crash marker: names the step a native crash happened in
 
 --[[
 * Settings: Ashita's settings lib is per-character by design.
@@ -155,6 +156,11 @@ local function adopt_aaev(s)
 end
 
 ashita.events.register('load', 'thud_load', function ()
+    local crashed = crumb.report();
+    if (crashed ~= nil) then
+        print(chat.header(addon.name):append(chat.error(
+            ('Last time goomui was unloaded by a crash during: %s. Please report this line.'):fmt(crashed))));
+    end
     bar.init();
     adopt_bar(settings.load(bar.defaults, 'bar'));
     adopt_ring(settings.load(ring.defaults, 'ring'));
@@ -220,7 +226,9 @@ local function guard(label, fn)
     local function trace(err) return debug.traceback(tostring(err), 1); end
     return function (...)
         if (failed) then return; end
+        crumb.begin(label);
         local ok, err = xpcall(fn, trace, ...);
+        crumb.done();
         if (ok) then return; end
         failed = true;
         print(chat.header(addon.name):append(chat.error(label .. ' off until reload (please report this):')));

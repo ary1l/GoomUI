@@ -12,6 +12,7 @@ local theme     = require('modules/theme');  -- the target cursor's palette colo
 local C         = ffi.C;
 local parse_action = require('modules/action');
 local ui        = require('modules/ui');
+local crumb     = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
 local dev       = d3d.get_device();
 
 local M = { };
@@ -730,9 +731,11 @@ local function ring_position(ent, index)
 
     if (ptr ~= nil and ptr ~= 0) then
         local base = (etype == 3) and OFF_OBJ or OFF_POS;
+        crumb.sub('rings: actor position read');
         local x = ashita.memory.read_float(ptr + base);
         local h = ashita.memory.read_float(ptr + base + 0x04);
         local z = ashita.memory.read_float(ptr + base + 0x08);
+        crumb.back();
 
         if (x == x and h == h and z == z and math.abs(x) < 10000.0 and math.abs(z) < 10000.0) then
             local aim = ashita.memory.read_float(ptr + OFF_HEADING);
@@ -2066,6 +2069,25 @@ end
 local CUR_KIND = { [COLOR_MOB] = argb_rgb(COLOR_MOB), [COLOR_PC] = argb_rgb(COLOR_PC),
     [COLOR_NPC] = argb_rgb(COLOR_NPC) };
 
+-- Bone 2's offset from the model root (the head), read through the actor's skeleton; nil when unreadable.
+local function head_offset(ent, index)
+    local rd = ashita.memory.read_uint32;
+    local p = rd(ent:GetActorPointer(index) + 0x6B8);
+    if (p == 0) then return nil; end
+    p = rd(p + 0x0C);
+    if (p == 0) then return nil; end
+    p = rd(p);
+    if (p == 0) then return nil; end
+    local bones = ashita.memory.read_uint16(p + 0x32);
+    if (bones == 0 or bones > 1024) then return nil; end
+    local g = p + 0x30 + 0x04 + 0x1E * bones + 0x04 + 2 * 0x1A + 0x0E; -- bone 2: its offset from the model root
+    local f = ashita.memory.read_float;
+    local dx, dh, dz = f(g), f(g + 0x04), f(g + 0x08);
+    if (dx ~= dx or dh ~= dh or dz ~= dz) then return nil; end
+    if (math.abs(dx) > 20 or math.abs(dz) > 20 or math.abs(dh) > 40) then return nil; end
+    return dx, dh, dz;
+end
+
 -- The head point (x, height, z) and extra px above it, or nil. Doors and other objects (type 3): their own position;
 -- an unrendered player (render flags 0): where last seen; anything else unrendered: none (no skeleton read).
 local function cursor_anchor(ent, index)
@@ -2084,20 +2106,10 @@ local function cursor_anchor(ent, index)
     end
     x, h, z = ring_position(ent, index);
     if (x == nil) then return nil; end
-    local rd = ashita.memory.read_uint32;
-    local p = rd(ent:GetActorPointer(index) + 0x6B8);
-    if (p == 0) then return nil; end
-    p = rd(p + 0x0C);
-    if (p == 0) then return nil; end
-    p = rd(p);
-    if (p == 0) then return nil; end
-    local bones = ashita.memory.read_uint16(p + 0x32);
-    if (bones == 0 or bones > 1024) then return nil; end
-    local g = p + 0x30 + 0x04 + 0x1E * bones + 0x04 + 2 * 0x1A + 0x0E; -- bone 2: its offset from the model root
-    local f = ashita.memory.read_float;
-    local dx, dh, dz = f(g), f(g + 0x04), f(g + 0x08);
-    if (dx ~= dx or dh ~= dh or dz ~= dz) then return nil; end
-    if (math.abs(dx) > 20 or math.abs(dz) > 20 or math.abs(dh) > 40) then return nil; end
+    crumb.sub('rings: cursor (skeleton read)');
+    local dx, dh, dz = head_offset(ent, index);
+    crumb.back();
+    if (dx == nil) then return nil; end
     return x + dx, h + dh, z + dz, 0;
 end
 
@@ -2314,6 +2326,7 @@ function M.render()
     if (not has_target and not has_geo and not has_cursor) then return; end
     if (not update_matrices()) then return; end
 
+    crumb.step('rings: draw (D3D)');
     tr.count = 0;
     tr.pulse = ring_pulse();
     begin_state();

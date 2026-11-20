@@ -9,6 +9,7 @@ local ffi      = require('ffi')
 local imgui    = require('imgui')
 local settings = require('settings')
 local theme    = require('modules/theme')
+local crumb    = require('modules/crumb') -- crash marker steps (modules/crumb.lua)
 local mobdebuff = require('modules/mobdebuff')
 
 local M = {}
@@ -484,13 +485,20 @@ local function menu_obj(sel_sig)
     return p or 0
 end
 
-local function menu_selected_id(sel_sig, getitem_fn)
+local function menu_selected_raw(sel_sig, getitem_fn)
     if sel_sig == 0 or not getitem_fn then return -1 end
     local obj = menu_obj(sel_sig)
     if obj == 0 then return -1 end
     if ashita.memory.read_int32(obj + 0x40) <= 0 then return -1 end
     local idx = ashita.memory.read_int32(obj + 0x30)
     return getitem_fn(obj, idx)
+end
+
+local function menu_selected_id(sel_sig, getitem_fn)
+    crumb.sub('target bar: menu item (game call)')
+    local id = menu_selected_raw(sel_sig, getitem_fn)
+    crumb.back()
+    return id
 end
 
 local function fmt_recast(s)
@@ -1215,7 +1223,9 @@ local function draw_debuff_row(data, px, top, bar_width, win_id, hkey, force_blu
     local panel_col, accent = panel_colors(data, force_blue)
     local opened, dl, win_h = begin_panel(win_id, px, top, panel_col, accent)
     if opened then
+        crumb.sub('target bar: debuff icons')
         mobdebuff.draw(dl, data.sid, rcache.bar_dx - DEBUFF_PAD[1], bar_width, tonumber(cfg.debuff_icon) or 18, data.raw_name)
+        crumb.back()
     end
     imgui.End()
     imgui.PopStyleVar(1)
@@ -1665,7 +1675,9 @@ function M.render()
             last_sub_idx      = sub_idx
             refresh_party_cache(now)
 
+            crumb.sub('target bar: menu help read')
             local raw_text = GetMenuHelpText()
+            crumb.back()
             if raw_text ~= last_raw_menu_text then
                 last_raw_menu_text = raw_text
                 if raw_text == '' then
