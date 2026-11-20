@@ -1181,8 +1181,10 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
         imgui.TextColored(data.name_color,
             fit_text(data.display_name, base + bar_width - imgui.GetCursorPosX()))
 
-        imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
+        -- Bar left edge, computed without moving the cursor: a SetCursorPos with no item after it trips
+        -- ImGui's "SetCursorPos to extend window boundaries" check (the NPC panel below submits nothing).
         local cx, cy = imgui.GetCursorScreenPos()
+        cx = cx + PANEL_PADDING
         if not is_sub then rcache.bar_dx = cx - pos_x end
 
         -- Non-mob NPCs have no HP to show: name line only, no empty bar. npc_pad = the height the bar row
@@ -1190,6 +1192,7 @@ local function draw_bar(data, win_id, pos_x, pos_y, bar_h, is_sub, force_blue, m
         if data.is_real_npc then
             npc_pad = bar_h + math.max(0, imgui.GetCursorPosY() - line_y - imgui.GetFontSize())
         else
+            imgui.SetCursorPosX(imgui.GetCursorPosX() + PANEL_PADDING)
             v_size[1], v_size[2] = bar_width, bar_h
             imgui.Dummy(v_size)
             if dl then theme.bar(dl, cx, cy, bar_width, bar_h, data.hp_frac, data.bar_color) end
