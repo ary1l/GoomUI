@@ -312,6 +312,19 @@ local function tab_look()
     end
 
     imgui.Separator();
+    imgui.TextColored(HEADER, 'UI scale (text and sizes of every goomui window)');
+    -- Applied on release: this window scales too, so a live drag would move the slider under the mouse.
+    if (G.scale_edit == nil) then G.scale_edit = { theme.ui_scale }; end
+    local sc_changed = imgui.SliderFloat('Scale##gui_ui_scale', G.scale_edit, 0.5, 3.0, '%.2f', ImGuiSliderFlags_AlwaysClamp);
+    local sc_done = released(sc_changed);
+    local sc_active = (imgui.IsItemActive ~= nil) and imgui.IsItemActive() or false;
+    if (not sc_active) and (not sc_done) then G.scale_edit[1] = theme.ui_scale; end
+    if (sc_done and G.on_scale ~= nil) then G.on_scale(G.scale_edit[1]); end
+    imgui.SameLine();
+    if (imgui.Button('1x##gui_ui_scale_reset') and G.on_scale ~= nil) then G.on_scale(1.0); end
+    imgui.TextColored(DIM, 'Also: /goomui scale <0.5-3>. Party lists keep their own scale on top of this.');
+
+    imgui.Separator();
     if (imgui.Button('Apply to all characters##gui_look_all')) then
         AshitaCore:GetChatManager():QueueCommand(-1, ('/mss /goomui look set %s %s %s %s %s %.2f'):fmt(
             theme.current or theme.DEFAULT, theme.shape, theme.texture, theme.frame and 'on' or 'off', theme.panel_style,

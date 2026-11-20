@@ -216,13 +216,14 @@ end
 -- A row's lots, passes and waiting count flow left to right and start a new line when the next piece does not fit
 -- (always on the same line, a piece near the edge wrapped one letter per line). A piece wider than the row wraps
 -- from a line start (the window's wrap position), and the next one starts below it.
-local ROW_W = WIDTH - 24; -- inside the window padding and the row indent
+local ROW_W = WIDTH - 24; -- inside the window padding and the row indent (rescaled in M.render)
 local lineX = 0;          -- px used on the current line
 local function inline(col, s, first)
     local w = imgui.CalcTextSize(s);
-    if (not first) and (lineX + 6 + w <= ROW_W) then
-        imgui.SameLine(0, 6);
-        lineX = lineX + 6 + w;
+    local gap = theme.px(6);
+    if (not first) and (lineX + gap + w <= ROW_W) then
+        imgui.SameLine(0, gap);
+        lineX = lineX + gap + w;
     else
         lineX = (w > ROW_W) and ROW_W or w;
     end
@@ -246,7 +247,7 @@ local function draw_row(r, party, myName, myZone)
     if (h.seen ~= nil) then
         local left = math.max(0, POOL_SECS - (now() - h.seen));
         local t = ('%d:%02d'):fmt(math.floor(left / 60), math.floor(left % 60));
-        imgui.SameLine(WIDTH - 12 - imgui.CalcTextSize(t));
+        imgui.SameLine(WIDTH - theme.px(12) - imgui.CalcTextSize(t));
         imgui.PushTextWrapPos(-1); -- never wrap the timer
         imgui.TextColored(left < 60 and COL.urgent or COL.timer, t);
         imgui.PopTextWrapPos();
@@ -419,6 +420,9 @@ local function draw_chip(n)
 end
 
 function M.render()
+    -- Pixel sizes follow the global UI scale (theme.ui_scale).
+    WIDTH, ROW_W, CHIP_GAP = theme.px(300), theme.px(276), theme.px(10);
+    CHIP_PAD[1], CHIP_PAD[2] = theme.px(6), theme.px(1);
     if (cfg == nil or cfg.show_pool == false) then return; end
     local n = demo and demo_rows() or read_pool();
     if (n == 0) then placed = false; return; end
@@ -442,8 +446,8 @@ function M.render()
         local dl = imgui.GetWindowDrawList();
         dl:AddRectFilled({ wx, wy }, { wx + ww, wy + wh }, theme.scale_alpha(PANEL_BG, theme.panel_alpha), 4.0);
         dl:AddRectFilled({ wx, wy + 2 }, { wx + 5, wy + wh - 2 }, ACCENT);
-        imgui.PushTextWrapPos(WIDTH - 8);
-        imgui.Dummy({ WIDTH - 16, 0 }); -- fixed width (the window auto-sizes to its content)
+        imgui.PushTextWrapPos(WIDTH - theme.px(8));
+        imgui.Dummy({ WIDTH - theme.px(16), 0 }); -- fixed width (the window auto-sizes to its content)
         local ok, err = pcall(draw_title, n);
         if (ok) then ok, err = pcall(draw_rows, n, party, myName, myZone); end
         imgui.PopTextWrapPos();

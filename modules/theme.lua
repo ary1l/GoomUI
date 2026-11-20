@@ -470,6 +470,46 @@ function T.set_panel(style, alpha)
     T.panel_alpha = (alpha < 0.25) and 0.25 or ((alpha > 2.0) and 2.0 or alpha);
 end
 
+-- UI scale (0.5 - 3): one multiplier for goomui's text and pixel sizes, for small or high-DPI screens.
+-- Text: ImGui 1.92 multiplies every font size by style.FontScaleMain when a window begins (Begin ->
+-- SetCurrentWindow -> UpdateCurrentFontSize), so goomui sets it around its own draws and restores it after:
+-- other addons keep their size. A 1x1 hidden window is begun after each change so the current font size
+-- (used by CalcTextSize outside a window) follows too. Pixel sizes: modules multiply by T.ui_scale (T.px).
+T.ui_scale = 1.0;
+function T.set_ui_scale(v)
+    v = tonumber(v) or 1.0;
+    T.ui_scale = (v < 0.5) and 0.5 or ((v > 3.0) and 3.0 or v);
+end
+function T.px(n) return floor(n * T.ui_scale + 0.5); end
+
+local FS_POS, FS_SIZE = { -100, -100 }, { 1, 1 };
+local FS_FLAGS = nil;
+local function fs_refresh()
+    if (FS_FLAGS == nil) then
+        FS_FLAGS = bit.bor(ImGuiWindowFlags_NoDecoration, ImGuiWindowFlags_NoInputs, ImGuiWindowFlags_NoBackground,
+            ImGuiWindowFlags_NoSavedSettings, ImGuiWindowFlags_NoFocusOnAppearing, ImGuiWindowFlags_NoNav);
+    end
+    imgui.SetNextWindowPos(FS_POS, ImGuiCond_Always);
+    imgui.SetNextWindowSize(FS_SIZE, ImGuiCond_Always);
+    imgui.Begin('##goomui_fontscale', true, FS_FLAGS);
+    imgui.End();
+end
+local fs_saved = nil;
+-- Wrap every goomui draw (d3d_present) in these two. No-ops at scale 1.
+function T.scale_begin()
+    if (T.ui_scale == 1.0 or fs_saved ~= nil) then return; end
+    local st = imgui.GetStyle();
+    fs_saved = st.FontScaleMain or 1.0;
+    st.FontScaleMain = fs_saved * T.ui_scale;
+    fs_refresh();
+end
+function T.scale_end()
+    if (fs_saved == nil) then return; end
+    imgui.GetStyle().FontScaleMain = fs_saved;
+    fs_saved = nil;
+    fs_refresh();
+end
+
 -- Alpha byte times m (imgui U32 and sprite ARGB both keep alpha in the top byte).
 function T.scale_alpha(c, m)
     local a = floor(floor(c / 0x1000000) * m + 0.5);

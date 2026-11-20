@@ -301,17 +301,18 @@ local dock = { on = false, x = 0, y = 0, w = 0, win_w = 0, pad = { 12, 4 } };
 -- Chat strip: player chart as one line under the chat log (set per frame in M.render).
 local strip = { on = false, x = 0, y = 0, w = 0, h = 15, bw = 100, bh = 11, n = 25, pad = { 3, 1 }, sp = { 4, 0 } };
 
+-- Chart sizes follow the global UI scale (theme.px); docked / strip sizes already come from scaled panels.
 local function chart_width(log_type)
-    if (log_type == TYPE_PET) then return settings.PetChartWidth; end
+    if (log_type == TYPE_PET) then return theme.px(settings.PetChartWidth); end
     if (strip.on) then return strip.bw; end
     if (dock.on) then return dock.w; end
-    return settings.ChartWidth;
+    return theme.px(settings.ChartWidth);
 end
 
 local function chart_height(log_type)
-    if (log_type == TYPE_PET) then return settings.PetChartHeight; end
+    if (log_type == TYPE_PET) then return theme.px(settings.PetChartHeight); end
     if (strip.on) then return strip.bh; end
-    return settings.ChartHeight;
+    return theme.px(settings.ChartHeight);
 end
 
 local function ws_count(log_type)
@@ -774,7 +775,7 @@ end
 local function draw_bars(tlog, log_type)
     local width, height, nbars;
     if (log_type == TYPE_PET) then
-        width, height, nbars = settings.PetChartWidth, settings.PetChartHeight, settings.PetChartBars;
+        width, height, nbars = chart_width(log_type), chart_height(log_type), settings.PetChartBars;
     else
         width, height, nbars = chart_width(log_type), chart_height(log_type), settings.ChartBars;
         if (strip.on) then nbars = strip.n; end
@@ -1223,9 +1224,9 @@ end
 fixed_window_size_calc = function (log_type)
     local width, height;
     if (log_type == TYPE_PET) then
-        width, height = settings.PetChartWidth, settings.PetChartHeight;
+        width, height = chart_width(log_type), chart_height(log_type);
     else
-        width, height = chart_width(log_type), settings.ChartHeight;
+        width, height = chart_width(log_type), theme.px(settings.ChartHeight);
     end
 
     -- Measured at scale 1 outside the window; the chart draws at FontScale

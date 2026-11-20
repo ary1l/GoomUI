@@ -1385,7 +1385,7 @@ local function fullTick(party, c)
     end
     for li = 0, 2 do
         local L = S[listKeys[li]];
-        local s = L.scale;
+        local s = L.scale * theme.ui_scale;
         local n = 0;
         local enabled = (li == 0) or not S.hideAlliance;
         for k = 0, 5 do
@@ -1533,7 +1533,7 @@ local function screenSize()
 end
 
 local function listSize(li)
-    local s = S[listKeys[li]].scale;
+    local s = S[listKeys[li]].scale * theme.ui_scale;
     if (S.lowfi) then
         if (li == 0) then return PL.w * s, PL.h * 6 * s; end
         return AL.w * s, AL.h * 6 * s;
@@ -1811,7 +1811,7 @@ function M.dock()
                     if (setup or party:GetMemberIsActive(k) ~= 0) then n = n + 1; end
                 end
                 if (n > 0) then
-                    local bottom = L.y + n * (S.lowfi and AL.h or A.h) * L.scale;
+                    local bottom = L.y + n * (S.lowfi and AL.h or A.h) * L.scale * theme.ui_scale;
                     if (above == nil or bottom > above) then above = bottom; end
                     if (stack == nil or L.y < stack) then stack = L.y; end
                 end
@@ -1890,7 +1890,9 @@ end
 -- Ashita unloading goomui.
 ashita.events.register('d3d_present', 'goomui_present', function ()
     crumb.begin('party list');
+    theme.scale_begin();
     local ok, err = xpcall(present, debug.traceback);
+    theme.scale_end();
     crumb.done();
     if (not ok) then reportErr('frame', err); end
 end);
