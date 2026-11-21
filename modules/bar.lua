@@ -9,6 +9,7 @@ local ffi      = require('ffi')
 local imgui    = require('imgui')
 local settings = require('settings')
 local theme    = require('modules/theme')
+local crumb    = require('modules/crumb') -- crash marker steps (modules/crumb.lua)
 local mobdebuff = require('modules/mobdebuff')
 
 local M = {}
@@ -58,6 +59,7 @@ local default_cfg = T{
     cast_linger   = 2.5,     -- seconds a finished / interrupted cast and a JA stay on screen
     panel_style   = 'tinted',-- panel backgrounds: tinted / dark / clear / framed
     panel_alpha   = 1.0,     -- panel opacity multiplier (0.25 - 2)
+    ui_scale      = 1.0,     -- goomui-wide UI scale, text + sizes (0.5 - 3): small / high-DPI screens
     migrated      = false,   -- old targetbar settings imported
 }
 M.defaults = default_cfg
@@ -71,6 +73,9 @@ local JA_BAR_LINGER   = 2.0
 
 local PANEL_PADDING   = 4
 local TOP_PADDING     = 2
+local SP              = 8      -- ItemSpacing.x allowance for a SameLine() gap
+local DEBUFF_PAD      = { 4, 2 }
+local DEBUFF_GAP      = 4
 
 local CAST_IDLE_EPS     = 0.02
 local CAST_RESTART_DROP = 0.05
@@ -273,10 +278,22 @@ local rcache = { bw = 400, bh = 14, win_w = 0, h_main = 32, h_sub = 24, h_cast =
 
 -- The GUI writes bar_width/bar_height live while a value is being typed; draw
 -- with clamped copies so a half-typed '1' or '-' never reaches Dummy/AddRect.
+local tw_cache, tw_n = {}, 0   -- text widths (text_w); cleared when the UI scale changes the font size
+local fit_cache, fit_n = {}, 0   -- fit_text results (string x width budget); cleared with tw_cache
+local tw_scale = 1.0
 local function update_rcache()
-    rcache.bw     = math.max(100, math.min(800, tonumber(cfg.bar_width)  or 400))
-    rcache.bh     = math.max(6,   math.min(48,  tonumber(cfg.bar_height) or 14))
-    rcache.win_w  = rcache.bw + 16
+    if tw_scale ~= theme.ui_scale then table.clear(tw_cache); tw_n = 0; table.clear(fit_cache); fit_n = 0; tw_scale = theme.ui_scale end
+    -- Pixel sizes follow the global UI scale (theme.ui_scale); the settings stay in scale-1 pixels.
+    rcache.bw     = theme.px(math.max(100, math.min(800, tonumber(cfg.bar_width)  or 400)))
+    rcache.bh     = theme.px(math.max(6,   math.min(48,  tonumber(cfg.bar_height) or 14)))
+    CAST_BAR_HEIGHT = theme.px(8)
+    PANEL_PADDING   = theme.px(4)
+    TOP_PADDING     = theme.px(2)
+    SP              = theme.px(8)
+    DEBUFF_PAD[1], DEBUFF_PAD[2] = theme.px(4), theme.px(2)
+    DEBUFF_GAP      = theme.px(4)
+    rcache.icon     = theme.px(tonumber(cfg.debuff_icon) or 18)
+    rcache.win_w  = rcache.bw + theme.px(16)
 end
 
 ------------------------------------------------------------
@@ -484,13 +501,20 @@ local function menu_obj(sel_sig)
     return p or 0
 end
 
-local function menu_selected_id(sel_sig, getitem_fn)
+local function menu_selected_raw(sel_sig, getitem_fn)
     if sel_sig == 0 or not getitem_fn then return -1 end
     local obj = menu_obj(sel_sig)
     if obj == 0 then return -1 end
     if ashita.memory.read_int32(obj + 0x40) <= 0 then return -1 end
     local idx = ashita.memory.read_int32(obj + 0x30)
     return getitem_fn(obj, idx)
+end
+
+local function menu_selected_id(sel_sig, getitem_fn)
+    crumb.sub('target bar: menu item (game call)')
+    local id = menu_selected_raw(sel_sig, getitem_fn)
+    crumb.back()
+    return id
 end
 
 local function fmt_recast(s)
@@ -680,16 +704,12 @@ end
 -- string is measured and shortened to the space left on its line. CalcTextSize runs on a cache miss only:
 -- results are keyed by string + a 4px-quantized budget; table.clear at 256 keys bounds the cache.
 local ELLIPSIS  = '...'
-local SP        = 8      -- ItemSpacing.x allowance for a SameLine() gap
-local fit_cache = {}
-local fit_n     = 0
 
 local function measure(s)
     return (imgui.CalcTextSize(s))
 end
 
 -- Width memo (split_fit, menu reserve).
-local tw_cache, tw_n = {}, 0
 local function text_w(s)
     if s == nil or s == '' then return 0 end
     local w = tw_cache[s]
@@ -782,7 +802,7 @@ local function begin_panel(win_id, px, py, panel_col, accent)
         end
         if accent then
             v_p1[1], v_p1[2] = wx, wy + 2
-            v_p2[1], v_p2[2] = wx + 5, wy + wh - 2
+            v_p2[1], v_p2[2] = wx + theme.px(5), wy + wh - 2
             dl:AddRectFilled(v_p1, v_p2, accent)
         end
         if clipped then pcall(dl.PopClipRect, dl) end
@@ -1205,8 +1225,6 @@ end
 -- Debuffs on a mob target: their own row on its target panel, in that panel's colours (force_blue as the panel
 -- had it). Above the panel by default, under it with cfg.debuffs_below. Main target and sub-target each get their
 -- own (win_id, rcache height key). A DEBUFF_GAP splits the row from the next panel up.
-local DEBUFF_PAD = { 4, 2 }
-local DEBUFF_GAP = 4
 local function debuff_shown(data)
     return data and data.is_mob and cfg.show_debuffs and mobdebuff.has(data.sid)
 end
@@ -1215,7 +1233,9 @@ local function draw_debuff_row(data, px, top, bar_width, win_id, hkey, force_blu
     local panel_col, accent = panel_colors(data, force_blue)
     local opened, dl, win_h = begin_panel(win_id, px, top, panel_col, accent)
     if opened then
-        mobdebuff.draw(dl, data.sid, rcache.bar_dx - DEBUFF_PAD[1], bar_width, tonumber(cfg.debuff_icon) or 18, data.raw_name)
+        crumb.sub('target bar: debuff icons')
+        mobdebuff.draw(dl, data.sid, rcache.bar_dx - DEBUFF_PAD[1], bar_width, rcache.icon or 18, data.raw_name)
+        crumb.back()
     end
     imgui.End()
     imgui.PopStyleVar(1)
@@ -1665,7 +1685,9 @@ function M.render()
             last_sub_idx      = sub_idx
             refresh_party_cache(now)
 
+            crumb.sub('target bar: menu help read')
             local raw_text = GetMenuHelpText()
+            crumb.back()
             if raw_text ~= last_raw_menu_text then
                 last_raw_menu_text = raw_text
                 if raw_text == '' then

@@ -15,6 +15,7 @@ local party    = require('modules/party');   -- registers its own draw / packet 
 local theme    = require('modules/theme');
 local mobdebuff = require('modules/mobdebuff');
 local pool     = require('modules/pool');
+local crumb    = require('modules/crumb');  -- crash marker: names the step a native crash happened in
 
 --[[
 * Settings: Ashita's settings lib is per-character by design.
@@ -134,6 +135,8 @@ local function adopt_bar(s)
     apply_theme(s.theme);
     theme.set_look(s.bar_style, s.bar_texture, s.bar_frame);
     theme.set_panel(s.panel_style, s.panel_alpha);
+    theme.set_ui_scale(s.ui_scale);
+    bar.update_rcache();
     aaev.retheme();
     -- goomui 2.0 single-style names (segmented / striped / outline) -> new keys
     if (s.bar_style ~= theme.shape or s.bar_texture ~= theme.texture or s.bar_frame ~= theme.frame) then
@@ -155,6 +158,11 @@ local function adopt_aaev(s)
 end
 
 ashita.events.register('load', 'thud_load', function ()
+    local crashed = crumb.report();
+    if (crashed ~= nil) then
+        print(chat.header(addon.name):append(chat.error(
+            ('Last time goomui was unloaded by a crash during: %s. Please report this line.'):fmt(crashed))));
+    end
     bar.init();
     adopt_bar(settings.load(bar.defaults, 'bar'));
     adopt_ring(settings.load(ring.defaults, 'ring'));
@@ -174,6 +182,14 @@ ashita.events.register('load', 'thud_load', function ()
         cfg.bar.panel_style, cfg.bar.panel_alpha = theme.panel_style, theme.panel_alpha;
         settings.save('bar');
         aaev.retheme();   -- AAEV plate follows the panel look
+    end
+    gui.on_scale = function (v)
+        if (cfg.bar == nil) then return; end
+        theme.set_ui_scale(v);
+        cfg.bar.ui_scale = theme.ui_scale;
+        settings.save('bar');
+        bar.update_rcache();
+        aaev.retheme();   -- AAEV re-measures its window at the new size
     end
     gui.on_look = function (shape, texture, frame)
         if (cfg.bar == nil) then return; end
@@ -215,12 +231,16 @@ ashita.events.register('packet_out', 'thud_bar_out',  function (e) bar.packet_ou
 ashita.events.register('packet_out', 'thud_ring_out', function (e) ring.packet_out(e); end);
 -- Draw callbacks run guarded: an error turns that one piece off until reload and prints where it happened
 -- (message + Lua stack), instead of Ashita unloading all of goomui on the first bad frame.
-local function guard(label, fn)
+local function guard(label, fn, noscale)
     local failed = false;
     local function trace(err) return debug.traceback(tostring(err), 1); end
     return function (...)
         if (failed) then return; end
+        crumb.begin(label);
+        if (not noscale) then theme.scale_begin(); end
         local ok, err = xpcall(fn, trace, ...);
+        if (not noscale) then theme.scale_end(); end
+        crumb.done();
         if (ok) then return; end
         failed = true;
         print(chat.header(addon.name):append(chat.error(label .. ' off until reload (please report this):')));
@@ -233,7 +253,7 @@ local function guard(label, fn)
     end
 end
 
-ashita.events.register('d3d_present', 'thud_ring_draw', guard('Rings', function () ring.render(); end));
+ashita.events.register('d3d_present', 'thud_ring_draw', guard('Rings', function () ring.render(); end, true)); -- world-space, no ImGui text
 ashita.events.register('d3d_present', 'thud_bar_draw',  guard('Target bar', function () bar.render(); end));
 ashita.events.register('d3d_present', 'thud_pool_draw', guard('Treasure pool window', function () pool.render(); end));
 ashita.events.register('d3d_present', 'thud_aaev_draw', guard('AAEV', function () aaev.render(); end));
@@ -290,6 +310,7 @@ local HELP = {
     '/goomui look [next|prev|<preset>] colour preset (no word = show current)',
     '/goomui look shape soft|flat|glass | texture none|segmented|striped|quarters|scanline|fade | frame [on|off]',
     '/goomui look panel tinted|dark|clear|framed | opacity <0.25-2>',
+    '/goomui scale <0.5-3>           UI scale: text + sizes of every goomui window (small / high-DPI screens)',
     '/goomui ring                    ring status',
     '/goomui ring on|off|depth|arrow|runes|fade|flip',
     '/goomui ring scale <n> | slices <n>',
@@ -316,6 +337,9 @@ ashita.events.register('command', 'thud_command', function (e)
     elseif (sub == 'pool') then
         local m = pool.command(args[3] and args[3]:lower() or nil);
         if (m ~= nil) then say(m); end
+    elseif (sub == 'scale') then
+        if (args[3] ~= nil and tonumber(args[3]) ~= nil) then gui.on_scale(tonumber(args[3])); end
+        say(('UI scale x%.2f (0.5 - 3). /goomui scale <n>'):fmt(theme.ui_scale));
     elseif (sub == 'look') then
         look_command(args[3] and args[3]:lower() or nil, args[4] and args[4]:lower() or nil, args);
     elseif (sub == 'ring') then

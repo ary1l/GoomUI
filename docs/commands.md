@@ -17,6 +17,7 @@
 | `/goomui look panel tinted\|dark\|clear\|framed` | panel backgrounds |
 | `/goomui look opacity <0.25-2>` | panel opacity |
 | `/goomui look set <preset> <shape> <texture> <frame on\|off> <panel> <opacity>` | all at once (what *Apply to all* sends) |
+| `/goomui scale <0.5-3>` | UI scale: text and sizes of every goomui window (small / high-DPI screens) |
 
 ## Party list
 

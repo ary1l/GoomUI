@@ -106,3 +106,10 @@ Look tab, *Panels*: the plates behind the target, cast, JA and menu panels and t
 
 *Opacity* (0.25 - 2) scales the plate. Commands: `/goomui look panel tinted|dark|clear|framed`,
 `/goomui look opacity <0.25-2>`. The kind stripe always shows.
+
+### UI scale
+
+*Scale* (0.5 - 3, Look tab) multiplies the text and pixel sizes of every goomui window: target / cast / menu
+panels, debuff icons, AAEV chart, treasure pool, party lists and the settings window. Settings stay in scale-1
+pixels. Party lists keep their own per-list scale on top of it. Applied when the slider is released; *1x* resets.
+Command: `/goomui scale <0.5-3>`. Other addons' text is not affected.

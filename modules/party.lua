@@ -36,6 +36,7 @@ local scaling  = require('scaling');
 local socket   = require('socket');
 local theme    = require('modules/theme');
 local ui       = require('modules/ui');
+local crumb    = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
 
 local M = { };
 
@@ -712,8 +713,11 @@ local function getIcon(id)
     if (res == nil or res.Bitmap == nil or res.ImageSize == nil or res.ImageSize <= 0) then return nil; end
     local tp   = ffi.new('IDirect3DTexture8*[1]');
     local info = ffi.new('D3DXIMAGE_INFO');
-    if (ffi.C.D3DXCreateTextureFromFileInMemoryEx(F.dev, res.Bitmap, res.ImageSize, 0xFFFFFFFF, 0xFFFFFFFF, 1, 0,
-        ffi.C.D3DFMT_A8R8G8B8, ffi.C.D3DPOOL_MANAGED, ffi.C.D3DX_DEFAULT, ffi.C.D3DX_DEFAULT, 0xFF000000, info, nil, tp) ~= ffi.C.S_OK) then
+    crumb.sub('party list: status icon texture');
+    local hr = ffi.C.D3DXCreateTextureFromFileInMemoryEx(F.dev, res.Bitmap, res.ImageSize, 0xFFFFFFFF, 0xFFFFFFFF, 1, 0,
+        ffi.C.D3DFMT_A8R8G8B8, ffi.C.D3DPOOL_MANAGED, ffi.C.D3DX_DEFAULT, ffi.C.D3DX_DEFAULT, 0xFF000000, info, nil, tp);
+    crumb.back();
+    if (hr ~= ffi.C.S_OK) then
         return nil;
     end
     local w = (info.Width > 0) and info.Width or 32;
@@ -879,7 +883,9 @@ local function refreshTex(o)
     o.ticket = nil;
     local old = g.texture;
     g.is_dirty = true;
+    crumb.sub('party list: text texture (gdifonts)');
     local tex, r = g:get_texture();
+    crumb.back();
     if (tex ~= nil) then
         if (old ~= nil and old ~= tex) then ffi.gc(old, nil); old:Release(); end
         o.tex, o.rect, o.w, o.hh, o.retryAt = tex, r, r.right, r.bottom, nil;
@@ -1379,7 +1385,7 @@ local function fullTick(party, c)
     end
     for li = 0, 2 do
         local L = S[listKeys[li]];
-        local s = L.scale;
+        local s = L.scale * theme.ui_scale;
         local n = 0;
         local enabled = (li == 0) or not S.hideAlliance;
         for k = 0, 5 do
@@ -1486,13 +1492,14 @@ local function tick()
         elseif (S.hideSolo and not anyOtherActive(party)) then show = false; end
     end
     if (not show) then hideAll(); return; end
-    if (F == nil) then initRenderer(); end
+    if (F == nil) then crumb.step('party list: renderer init (gdifonts DLL)'); initRenderer(); end
     if (F.sprite == nil) then
-        if (tickNow >= F.spriteRetry) then createSprite(); end
+        if (tickNow >= F.spriteRetry) then crumb.step('party list: sprite create'); createSprite(); end
         if (F.sprite == nil) then hideAll(); return; end
     end
     visible = true;
 
+    crumb.step('party list: update (party / target reads)');
     ctx.myZone = party:GetMemberZone(0);
     ctx.tMain, ctx.tSub, ctx.stIdx = getTargets();
     ctx.l1 = party:GetAlliancePartyLeaderServerId1();
@@ -1526,7 +1533,7 @@ local function screenSize()
 end
 
 local function listSize(li)
-    local s = S[listKeys[li]].scale;
+    local s = S[listKeys[li]].scale * theme.ui_scale;
     if (S.lowfi) then
         if (li == 0) then return PL.w * s, PL.h * 6 * s; end
         return AL.w * s, AL.h * 6 * s;
@@ -1804,7 +1811,7 @@ function M.dock()
                     if (setup or party:GetMemberIsActive(k) ~= 0) then n = n + 1; end
                 end
                 if (n > 0) then
-                    local bottom = L.y + n * (S.lowfi and AL.h or A.h) * L.scale;
+                    local bottom = L.y + n * (S.lowfi and AL.h or A.h) * L.scale * theme.ui_scale;
                     if (above == nil or bottom > above) then above = bottom; end
                     if (stack == nil or L.y < stack) then stack = L.y; end
                 end
@@ -1855,6 +1862,7 @@ local function present()
     local now = ashita.time.get_tick64();
     if (setup or now - lastTick >= (S.lowfi and S.lofiMs or S.updateMs)) then
         lastTick = now;
+        crumb.step('party list: update');
         if (perf.on) then
             local dt = timed(safeTick);
             perf.tickSum, perf.tickN = perf.tickSum + dt, perf.tickN + 1;
@@ -1864,6 +1872,7 @@ local function present()
         end
     end
     if (visible and F ~= nil and AshitaCore:GetFontManager():GetVisible()) then
+        crumb.step('party list: sprite draw');
         if (perf.on) then
             local dt = timed(draw);
             perf.drawSum, perf.drawN = perf.drawSum + dt, perf.drawN + 1;
@@ -1871,15 +1880,20 @@ local function present()
         else
             draw();
         end
+        crumb.step('party list: hover tip');
         hoverTip();
     end
-    if (setup) then drawSetup(); end
+    if (setup) then crumb.step('party list: setup window'); drawSetup(); end
     if (perf.on and now >= perf.stop) then perfReport(); end
 end
 -- Whole frame guarded (hover tip, setup window, perf too): an error is printed with its Lua stack instead of
 -- Ashita unloading goomui.
 ashita.events.register('d3d_present', 'goomui_present', function ()
+    crumb.begin('party list');
+    theme.scale_begin();
     local ok, err = xpcall(present, debug.traceback);
+    theme.scale_end();
+    crumb.done();
     if (not ok) then reportErr('frame', err); end
 end);
 

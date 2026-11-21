@@ -12,6 +12,7 @@
 
 require('common');
 local imgui = require('imgui');
+local crumb = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
 
 local T = { };
 local floor = math.floor;
@@ -468,6 +469,41 @@ function T.set_panel(style, alpha)
     T.panel_style = PANELS[style] and style or 'tinted';
     alpha = tonumber(alpha) or 1.0;
     T.panel_alpha = (alpha < 0.25) and 0.25 or ((alpha > 2.0) and 2.0 or alpha);
+end
+
+-- UI scale (0.5 - 3): one multiplier for goomui's text and pixel sizes, for small or high-DPI screens.
+-- Text: ImGui 1.92's PushFont(font, size) sets the base font size and recomputes the current size at once
+-- (imgui.cpp PushFont -> SetCurrentFont -> UpdateCurrentFontSize); Begin keeps it, PopFont restores it. So
+-- goomui pushes base * scale around its own draws and other addons keep their size. Same call XIUI uses for
+-- its config window (XIUI.lua PushChromeFont), gated the same way: Ashita 4.3 (ImGui 1.92) exposes a numeric
+-- style.FontSizeBase; older builds have no size argument, so text stays unscaled there.
+-- Pixel sizes: modules multiply by T.ui_scale (T.px).
+T.ui_scale = 1.0;
+function T.set_ui_scale(v)
+    v = tonumber(v) or 1.0;
+    T.ui_scale = (v < 0.5) and 0.5 or ((v > 3.0) and 3.0 or v);
+end
+function T.px(n) return floor(n * T.ui_scale + 0.5); end
+
+local font_size_ok = nil;   -- Ashita 4.3+: PushFont takes a size
+local font_pushed = false;
+-- Wrap every goomui draw (d3d_present) in these two. No-ops at scale 1.
+function T.scale_begin()
+    if (T.ui_scale == 1.0 or font_pushed) then return; end
+    local st = imgui.GetStyle();
+    if (font_size_ok == nil) then font_size_ok = (st ~= nil and type(st.FontSizeBase) == 'number'); end
+    if (not font_size_ok) then return; end
+    crumb.sub('ui scale: font push');
+    imgui.PushFont(imgui.GetFont(), floor(st.FontSizeBase * T.ui_scale + 0.5));
+    crumb.back();
+    font_pushed = true;
+end
+function T.scale_end()
+    if (not font_pushed) then return; end
+    crumb.sub('ui scale: font pop');
+    imgui.PopFont();
+    crumb.back();
+    font_pushed = false;
 end
 
 -- Alpha byte times m (imgui U32 and sprite ARGB both keep alpha in the top byte).
