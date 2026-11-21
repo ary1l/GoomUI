@@ -1272,9 +1272,12 @@ local function lofiNameColor(d, c)
     return col;
 end
 
-local function lofiMark(R, sel, sub, x, cy, h)
-    if (sel) then put(R, 'mark', '>', x, cy, h, 0xFFFFFFFF, nil, true);
-    elseif (sub) then put(R, 'mark', '-', x, cy, h, 0xFF80A0FF, nil, true);
+-- low-fi selected / sub-target member: the row gets full mode's fill (rowMark: light fill; sub-target blue fill +
+-- frame) and a '>' right-aligned to rightX, the gap left of the name (gold; sub-target in the sub frame blue).
+local LO_MARK_SEL = 0xFFFFD040;
+local function lofiMark(R, sel, sub, rightX, cy, h)
+    if (sel) then put(R, 'mark', '>', 0, cy, h, LO_MARK_SEL, rightX, true);
+    elseif (sub) then put(R, 'mark', '>', 0, cy, h, S.color.subFrame, rightX, true);
     else R.mark.on = false; end
 end
 
@@ -1287,7 +1290,7 @@ local function putLbl(R, key, text, numKey, cy, f, s)
     put(R, key, text, 0, cy, f, LBL, n.x - 4 * s, true);
 end
 
--- low-fi party row (40 px, labeled, no bars):
+-- low-fi party row (40 px, labeled, no bars; the selected / sub-target row gets a fill, rowMark):
 --   > Arin                 MNK99/WAR55
 --     HP  5114   MP  415   TP 3000    0.3
 -- HP number colored by HP%, TP cyan at 1000+, distance orange past cast range.
@@ -1296,7 +1299,8 @@ local function layPartyLo(R, d, ox, oy, s, sel, sub, c)
     R.hpp.on = false;
     local f9, f10, f11, f12 = fsz(9, s), fsz(10, s), fsz(11, s), fsz(12, s);
     local cy1, cy2 = oy + 9 * s, oy + 28 * s;
-    lofiMark(R, sel, sub, ox, cy1, f11);
+    rowMark(ox - 2 * s, oy - s, (PL.w + 4) * s, PL.h * s, s, sel, sub);
+    lofiMark(R, sel, sub, ox + 13 * s, cy1, fsz(16, s));
     put(R, 'name', d.name, ox + 14 * s, cy1, f12, fade(lofiNameColor(d, c), rangeMult(d)), nil, true);
     leaderStar(R, d, c, rangeMult(d), s);
     if (S.jobColors) then -- MNK99 / WAR55 as three texts (right to left): sub, grey slash, main
@@ -1342,7 +1346,8 @@ local function layAllyLo(R, d, ox, oy, s, sel, sub, c)
     R.l2.on = false;
     local f9, f10 = fsz(9, s), fsz(10, s);
     local cy = oy + 8 * s;
-    lofiMark(R, sel, sub, ox, cy, f10);
+    rowMark(ox - 2 * s, oy - s, (AL.w + 4) * s, AL.h * s, s, sel, sub);
+    lofiMark(R, sel, sub, ox + 9 * s, cy, fsz(13, s));
     put(R, 'main', R.mjT, ox + 10 * s, cy, f10, jobArgb(d.mj, 0xFFA8A8A8), nil, true);
     put(R, 'name', d.name, ox + 40 * s, cy, f10, fade(lofiNameColor(d, c), rangeMult(d)), nil, true);
     leaderStar(R, d, c, rangeMult(d), s);
