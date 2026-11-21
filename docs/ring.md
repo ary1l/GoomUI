@@ -22,8 +22,8 @@ customtarget addon does: unload that one.
   and *Crystal* (an eight-faced crystal that turns; *Spin* off holds it still).
 - **Colours:** a palette colour (HP, MP, TP, Spell, Crit, WS, ...), so it follows the colour preset; White; or
   *Target kind*, the ring colours (mobs, players, NPCs). Default MP.
-- **Sub-target colour:** while you sub-target, your first target keeps a cursor in this colour, 10 px higher; item,
-  `<stnpc>` and `<stpc>` picks use it too. Default TP ready.
+- **Sub-target colour:** the target you are picking (`<st>`), and item, `<stnpc>` and `<stpc>` picks. While you
+  sub-target, your held target keeps a cursor in *Colour*, 10 px higher. Default TP ready.
 - **Float:** drifts up and down 2.5 px.
 - **Lift over players:** 12 px higher over players (0-40), clearing the master level stars on their nameplate.
 - **Apply to all characters:** sends the cursor settings to every character with `/mss` (MultiSend). The Look tab
