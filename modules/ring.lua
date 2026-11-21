@@ -178,7 +178,7 @@ local default_settings = T{
     -- Target cursor over the target's head (see Target cursor below)
     cursor       = true,
     cursor_color = 'mp',     -- 'white' or a goomui palette colour (M.CURSOR_COLORS), following the colour preset
-    cursor_sub   = 'tp_rdy', -- the first target while you sub-target, and item / <stnpc> / <stpc> picks
+    cursor_sub   = 'tp_rdy', -- the target you are picking (<st>), and item / <stnpc> / <stpc> picks
     cursor_size  = 1.0,
     cursor_style = 'gem',    -- M.CURSOR_STYLES
     cursor_float = false,    -- drifts up and down
@@ -1980,7 +1980,7 @@ local CUR_BORDER = 1.8;         -- light border, then a dark ring, then the core
 local CUR_RING   = 2.5;
 local CUR_SEGS   = 4;           -- arc steps per corner
 local CUR_FRINGE = 1.0;         -- screen px each edge fades out over (smooth edges at any size)
-local CUR_RAISE  = 10;          -- px: the first target's cursor while sub-targeting
+local CUR_RAISE  = 10;          -- px: your held target's cursor while sub-targeting
 local CUR_FLOAT, CUR_FLOAT_SECS = 2.5, 1.6; -- Float: px it drifts up, seconds per drift
 local CUR_WHITE  = { 245, 245, 245 };
 -- The skeleton: the triangle (top left, top right, bottom point) that, grown by CUR_R, fills the box exactly.
@@ -2304,7 +2304,7 @@ local function draw_frame(has_geo, has_target, has_cursor, index, index_sub, fir
         dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_INVSRCALPHA);
         dev:SetRenderState(C.D3DRS_ZENABLE, 0);
         draw_cursor(index, pick and cfg.cursor_sub or cfg.cursor_color, 0);
-        draw_cursor(first, cfg.cursor_sub, CUR_RAISE);
+        draw_cursor(first, cfg.cursor_color, CUR_RAISE);
         flush();
     end
 end
@@ -2360,14 +2360,17 @@ function M.render()
 
     local index = 0;
     local index_sub = nil;
-    local first = nil;  -- the held target while sub-targeting (its cursor shows even when it is the one picked)
-    local pick = false; -- an item / <stnpc> / <stpc> pick, not sub-targeting: the cursor takes the sub colour
+    -- Sub-target colour = the target being picked, as the target bar's blue sub panel and the party list's
+    -- sub-target row; your held <t> keeps the main colour.
+    local first = nil;  -- the held <t> while sub-targeting: main colour, raised (shows even when it is the one picked)
+    local pick = false; -- the cursor marks a pick (<st>, or an item / <stnpc> / <stpc> pick): sub colour
 
     if (cfg.enabled or want_cursor) then
         -- Ashita libs/ffxi/targets.lua: while sub-targeting, slot 0 is the pick (<st>) and slot 1 the held <t>.
         local target = mm:GetTarget();
         if (target:GetIsSubTargetActive() == 1) then
             index = target:GetTargetIndex(0);
+            pick  = true;
             first = target:GetTargetIndex(1);
             if (first == 0) then first = nil; end
             if (first ~= nil and first ~= index) then index_sub = first; end

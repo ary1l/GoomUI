@@ -254,8 +254,8 @@ local function tab_cursor(c, ring)
     imgui.Separator();
     if (imgui.Button('Apply to all characters##gui_cursor_all')) then ring.cursor_apply_all(); end
     imgui.TextColored(DIM, 'Sends these settings to every character with /mss (MultiSend).');
-    imgui.TextColored(DIM, 'Sub-target colour: your first target while you pick another,');
-    imgui.TextColored(DIM, 'and item / <stnpc> / <stpc> picks. Target kind: the ring colours.');
+    imgui.TextColored(DIM, 'Sub-target colour: the target you are picking (<st>), and item / <stnpc> /');
+    imgui.TextColored(DIM, '<stpc> picks. Your held target keeps Colour. Target kind: the ring colours.');
     imgui.TextColored(DIM, 'Lift over players: clears the master level stars on their nameplate.');
 end
 

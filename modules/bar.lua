@@ -1690,7 +1690,8 @@ function M.render()
             crumb.back()
             if raw_text ~= last_raw_menu_text then
                 last_raw_menu_text = raw_text
-                if raw_text == '' then
+                -- no letter or digit (spaces, control bytes): nothing to show, not an empty '( )'
+                if not string.find(raw_text, '%w') then
                     last_menu_text = ''
                 else
                     last_menu_text = is_excluded_text(string.lower(raw_text))
