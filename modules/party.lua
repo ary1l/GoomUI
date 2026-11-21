@@ -841,8 +841,10 @@ end
 local gdi = nil; -- lazy require (in initRenderer)
 local FONT_BUDGET = 8;     -- max new text objects per tick
 local ICON_BUDGET = 4;     -- max new icon textures per tick
-local REBUILD_PER_SEC = 240; -- text texture rebuilds (GDI+) per second; per-tick budget scales with tick length
-                              -- (12 at 50 ms, 60 at 250 ms low-fi, 4 per frame in setup)
+-- Text texture rebuilds (GDI+ in gdifonts' DLL) run in present(), at most REBUILD_PER_FRAME a frame, oldest change
+-- first. They used to run in the tick, up to 60 in one frame on a low-fi tick (budget = tick length * 240/s), which
+-- showed up as 10-20 ms frames in combat.
+local REBUILD_PER_FRAME = 3;
 local function gdiH(h) return floor(h * S.textScale * 1.3 + 0.5); end -- gdifonts px vs old Ashita sizes
 local VC_FIX = 0.6; -- vertical-centering correction (fraction of font px)
 
@@ -865,21 +867,13 @@ local function newText(h)
     return o;
 end
 
--- Rebuild the texture if dirty, oldest first. A dirty text takes a ticket; each tick serves the
--- `budget` oldest tickets still in use (window set in fullTick), so the per-tick count is capped and
--- no text starves whatever the put() order. Until then the old texture stays on screen. A failed
--- build keeps the old texture and retries in 1 s (gdifonts clears is_dirty before building, so a
--- failure used to blank the text until its text changed). Old textures are released explicitly.
--- First builds (o.tex == nil) are not ticketed: they are capped by FONT_BUDGET new objects per tick.
-local function refreshTex(o)
+-- Texture builds. A text whose texture exists and changed takes a ticket (refreshTex, in the tick); serveTexts
+-- rebuilds the oldest tickets each frame and puts the text back in place, so no text starves whatever the put()
+-- order and the old texture stays on screen until then. A failed build keeps the old texture and retries in 1 s
+-- (gdifonts clears is_dirty before building, so a failure used to blank the text until its text changed). Old
+-- textures are released explicitly. First builds (o.tex == nil) run at once: FONT_BUDGET new objects per tick.
+local function buildTex(o)
     local g = o.g;
-    if (tickNow < (o.retryAt or 0)) then return; end
-    if (o.tex ~= nil) then
-        if (not g.is_dirty) then o.ticket = nil; return; end
-        local t = o.ticket;
-        if (t == nil) then t = F.ticketNext; F.ticketNext = t + 1; o.ticket = t; end
-        if (t > F.serveTo) then return; end
-    end
     o.ticket = nil;
     local old = g.texture;
     g.is_dirty = true;
@@ -891,6 +885,45 @@ local function refreshTex(o)
         o.tex, o.rect, o.w, o.hh, o.retryAt = tex, r, r.right, r.bottom, nil;
     else
         g.texture, g.is_dirty, o.retryAt = old, true, tickNow + 1000;
+    end
+end
+
+local function refreshTex(o)
+    local g = o.g;
+    if (tickNow < (o.retryAt or 0)) then return; end
+    if (o.tex == nil) then buildTex(o); return; end
+    if (not g.is_dirty) then o.ticket = nil; return; end
+    if (o.ticket == nil) then o.ticket = F.ticketNext; F.ticketNext = F.ticketNext + 1; end
+end
+
+-- Screen position from what put() was given and the current texture size (again after a deferred rebuild).
+local function place(o)
+    local x = (o.rx ~= nil) and (o.rx - o.w) or o.lx;
+    local y = o.ly;
+    if (o.vc) then
+        -- gdifonts textures carry extra space under the glyphs: texture-center put glyphs ~0.6 px-size too high
+        -- (measured in-game 1.3.4: name 10 px, numbers 8 px above target). Shift down by VC_FIX * font px.
+        y = o.cy - o.hh / 2 + VC_FIX * o.px;
+    end
+    o.x, o.y = floor(x), floor(y);
+end
+
+-- Up to n queued rebuilds of texts shown in the last tick, oldest ticket first.
+local function serveTexts(n)
+    local texts, pass = F.texts, F.pass;
+    for _ = 1, n do
+        local best = nil;
+        for i = 1, #texts do
+            local o = texts[i];
+            if (o.ticket ~= nil and o.seen == pass and (best == nil or o.ticket < best.ticket)) then best = o; end
+        end
+        if (best == nil) then return; end
+        if (tickNow < (best.retryAt or 0) or not best.g.is_dirty) then
+            best.ticket = nil;
+        else
+            buildTex(best);
+            if (best.tex ~= nil) then place(best); end
+        end
     end
 end
 
@@ -929,15 +962,9 @@ local function put(R, key, text, x, y, h, color, rightX, vc)
     o.seen = F.pass;
     if (g.is_dirty or o.tex == nil) then refreshTex(o); end
     if (o.tex == nil) then o.on = false; return; end
-    if (rightX ~= nil) then x = rightX - o.w; end
-    if (vc) then
-        -- gdifonts textures carry extra space under the glyphs: texture-center put glyphs ~0.6 px-size too high
-        -- (measured in-game 1.3.4: name 10 px, numbers 8 px above target). Shift down by VC_FIX * font px.
-        local px = gdiH(h);
-        o.cy, o.px = y, px;
-        y = y - o.hh / 2 + VC_FIX * px;
-    end
-    o.x, o.y = floor(x), floor(y);
+    o.rx, o.lx, o.ly, o.vc = rightX, x, y, vc;
+    if (vc) then o.cy, o.px = y, gdiH(h); end
+    place(o);
     o.on = true;
 end
 
@@ -1007,7 +1034,7 @@ local function initRenderer()
         end
     end
     F = { rows = {}, texts = {}, icons = {}, iconCount = 0, selfNext = 0, budget = FONT_BUDGET, iconBudget = ICON_BUDGET,
-          ticketNext = 1, serveTo = 0, lastTick = 0, spriteRetry = 0, pass = 0,
+          ticketNext = 1, spriteRetry = 0, pass = 0,
           RX = {}, RY = {}, RW = {}, RH = {}, RC = {}, nR = 0,
           OX = {}, OY = {}, OW = {}, OH = {}, OC = {}, nO = 0,
           IE = {}, IX = {}, IY = {}, IS = {}, IC = {}, nI = 0,
@@ -1367,18 +1394,7 @@ end
 local function fullTick(party, c)
     F.nR, F.nI, F.nHit, F.nO = 0, 0, 0, 0;
     F.budget, F.iconBudget = FONT_BUDGET, ICON_BUDGET;
-    -- rebuild window: the `budget` oldest tickets among texts put last pass (hidden ones don't block it)
-    local budget = floor((tickNow - F.lastTick) * REBUILD_PER_SEC / 1000);
-    if (budget < 4) then budget = 4; elseif (budget > 60) then budget = 60; end
-    F.lastTick = tickNow;
-    local minT, texts, pass = nil, F.texts, F.pass;
-    for i = 1, #texts do
-        local o = texts[i];
-        local t = o.ticket;
-        if (t ~= nil and o.seen == pass and (minT == nil or t < minT)) then minT = t; end
-    end
-    F.serveTo = (minT or F.ticketNext) + budget - 1;
-    F.pass = pass + 1;
+    F.pass = F.pass + 1;
     iconsTrim(); -- nothing queued yet this tick
     local entity = S.showDist and mm:GetEntity() or nil;
     if (S.showBuffs and not setup) then
@@ -1466,6 +1482,15 @@ local function draw()
     local ok, err = xpcall(drawBody, debug.traceback, sp);
     sp:End();
     if (not ok) then reportErr('draw', err); end
+end
+
+-- Queued text rebuilds (a few a frame), then the sprite pass: /goomui perf's draw time includes both.
+local function drawFrame()
+    if (not gdiFailed) then
+        local ok, err = xpcall(serveTexts, debug.traceback, REBUILD_PER_FRAME);
+        if (not ok) then reportErr('text', err); end
+    end
+    draw();
 end
 
 local function hoverTip()
@@ -1879,11 +1904,11 @@ local function present()
     if (visible and F ~= nil and AshitaCore:GetFontManager():GetVisible()) then
         crumb.step('party list: sprite draw');
         if (perf.on) then
-            local dt = timed(draw);
+            local dt = timed(drawFrame);
             perf.drawSum, perf.drawN = perf.drawSum + dt, perf.drawN + 1;
             if (dt > perf.drawMax) then perf.drawMax = dt; end
         else
-            draw();
+            drawFrame();
         end
         crumb.step('party list: hover tip');
         hoverTip();

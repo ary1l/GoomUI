@@ -907,7 +907,11 @@ local function dist3(ent, a, b)
     return math.sqrt(dx * dx + dh * dh + dz * dz);
 end
 
-local function index_of(id)
+-- quick: no full scan (prune_tags). A mob keeps its index while it exists (the client binds a server id to the
+-- index the server sends with it and recreates the entity when they differ: XiPackets 0x000E), so a tagged mob that
+-- is neither at its cached index nor at the low-12-bit guess is gone; scanning 0x900 slots once a second for each
+-- dead mob only made spikes.
+local function index_of(id, quick)
     if (id == nil or id == 0) then return nil; end
 
     local hit = geo.id_index[id];
@@ -922,6 +926,7 @@ local function index_of(id)
         geo.id_index[id] = guess;
         return guess;
     end
+    if (quick) then return nil; end
 
     -- Full scan = 0x900 FFI calls: an id that missed within the last second is not rescanned.
     local now = os.clock();
@@ -1131,7 +1136,7 @@ local function prune_tags()
     local now = os.clock();
 
     for id in pairs(geo.tagged) do
-        local index = index_of(id);
+        local index = index_of(id, true);
         if (index == nil or ent:GetServerId(index) ~= id) then
             geo.dying[id] = nil;
             geo.id_index[id] = nil;
@@ -1155,7 +1160,7 @@ local function prune_tags()
     for ally_id, mobs in pairs(geo.hate) do
         for mob_id in pairs(mobs) do
             if (geo.tagged[mob_id] == nil) then
-                local index = index_of(mob_id);
+                local index = index_of(mob_id, true);
                 if (index == nil or ent:GetServerId(index) ~= mob_id) then
                     geo.id_index[mob_id] = nil;
                     if (geo.missing[mob_id] == nil) then
@@ -1250,12 +1255,34 @@ end
 
 -- Debuff bubbles ring only mobs inside the bubble: green when the geomancer
 -- already has enmity on them, red when it still needs a tag.
+-- Mob slots: a full sweep at most every MOB_SWEEP s finds new mobs; the mobs it found are re-checked every GEO_TICK.
+-- Players (target index 1024-1791) are never mobs: the client keeps static NPCs at 0-1023, players at 1024-1791 and
+-- spawnables (pets, trusts...) at 1792-2303 (XiPackets 0x000E, entity name). Was all 0x900 slots every 0.25 s on
+-- every box (any job) while a party GEO had a luopan out.
+local MOB_SWEEP = 1.0;
+local function mob_slots(ent)
+    local now = os.clock();
+    if (geo.mob_list ~= nil and now < (geo.mob_sweep_at or 0)) then return geo.mob_list; end
+    geo.mob_sweep_at = now + MOB_SWEEP;
+    local list = { };
+    for index = 0, 1023 do
+        if (is_mob(ent, index)) then list[#list + 1] = index; end
+    end
+    for index = 1792, MAX_INDEX - 1 do
+        if (is_mob(ent, index)) then list[#list + 1] = index; end
+    end
+    geo.mob_list = list;
+    return list;
+end
+
 local function build_debuff_rings(ent, luopan, radius)
     geo.auto_tag = auto_tagged();
     local list = { };
     local scan = cfg.geo_scan;
 
-    for index = 0, MAX_INDEX - 1 do
+    local slots = mob_slots(ent);
+    for i = 1, #slots do
+        local index = slots[i];
         if (is_mob(ent, index)) then
             local id = ent:GetServerId(index);
             if (id ~= 0) then
