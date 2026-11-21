@@ -116,6 +116,7 @@ docs/                 these pages
 |---|---|
 | Addon unloads with an error | the line number: if it does not match this version, an old file is still in `addons/goomui/` |
 | Addon unloads with `EXCEPTION_ACCESS_VIOLATION` (no line number) | `/addon load goomui`: it prints the step that was running when it crashed. Report that line |
+| `Rings skipped a frame` line | rings stay on (a draw that errors skips that frame); report the line. Rings turn off only if 3 frames in a row fail |
 | Two party lists | another party list addon still loaded: unload it |
 | Party list gone | `/goomui setup` to see the boxes; hidden while solo if *Hide solo* is on |
 | Bar and chart overlap other UI | move the bar (Bar tab); the chart moves with it |

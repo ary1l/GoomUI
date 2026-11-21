@@ -7,6 +7,7 @@ require('common');
 
 local d3d       = require('d3d8');
 local ffi       = require('ffi');
+local chat      = require('chat');
 local settings  = require('settings');
 local theme     = require('modules/theme');  -- the target cursor's palette colours
 local C         = ffi.C;
@@ -2268,6 +2269,65 @@ end
 --------------------------------------------------------------------------------
 -- Events
 ----------------------------------------------------------------------------------------------------
+-- One frame's rings and cursors, between begin_state and end_state.
+local function draw_frame(has_geo, has_target, has_cursor, index, index_sub, first, pick)
+    -- Fills first, under a normal alpha blend. Additive fill vanished against
+    -- bright terrain, which made the in-range wash unreadable outdoors.
+    dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_INVSRCALPHA);
+
+    if (has_geo) then
+        draw_geo_rings('fill');
+    end
+
+    if (has_target) then
+        draw_ring(index_sub, 'fill');
+        draw_ring(index, 'fill');
+    end
+
+    flush();
+
+    -- Bands stay additive so they glow on dark ground.
+    dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_ONE);
+
+    if (has_geo) then
+        draw_geo_rings('band');
+    end
+
+    if (has_target) then
+        draw_ring(index_sub, 'band');
+        draw_ring(index, 'band');
+    end
+
+    flush();
+
+    if (has_cursor) then -- over everything: normal blend, no depth test
+        dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_INVSRCALPHA);
+        dev:SetRenderState(C.D3DRS_ZENABLE, 0);
+        draw_cursor(index, pick and cfg.cursor_sub or cfg.cursor_color, 0);
+        draw_cursor(first, cfg.cursor_sub, CUR_RAISE);
+        flush();
+    end
+end
+
+-- A frame whose draw errors is skipped; Rings turn off (with the error) only when 3 frames in a row fail.
+-- Seen once: 'sol: received nil for self' from IEntity:GetType in cursor_anchor while switching targets, on the
+-- entity manager object that GetStatus had just used in the same frame. Cause unknown, so the first skipped
+-- frame prints the error and whether that object and a freshly fetched one still answer.
+local frame = { fails = 0, noted = false };
+local function note_skipped_frame(err, index)
+    local line = (tostring(err):match('^[^\n]*') or '?'):gsub('^.-[\\/]addons[\\/]', '');
+    local diag = '';
+    local old = tr.ent;
+    if (old ~= nil and index ~= nil and index ~= 0) then
+        local ok_old = pcall(function () return old:GetStatus(index); end);
+        local ok_new = pcall(function () return AshitaCore:GetMemoryManager():GetEntity():GetType(index); end);
+        diag = (' | index %d, same object: %s, fresh object: %s'):fmt(index, ok_old and 'ok' or 'fails',
+            ok_new and 'ok' or 'fails');
+    end
+    print(chat.header(addon.name):append(chat.error(
+        ('Rings skipped a frame (they stay on; please report this line): %s%s'):fmt(line, diag))));
+end
+
 function M.render()
     local want_cursor = (cfg.cursor ~= false);
     if (not cfg.enabled and not cfg.geo and not want_cursor) then return; end
@@ -2330,44 +2390,19 @@ function M.render()
     tr.count = 0;
     tr.pulse = ring_pulse();
     begin_state();
-
-    -- Fills first, under a normal alpha blend. Additive fill vanished against
-    -- bright terrain, which made the in-range wash unreadable outdoors.
-    dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_INVSRCALPHA);
-
-    if (has_geo) then
-        draw_geo_rings('fill');
+    local ok, err = xpcall(draw_frame, debug.traceback, has_geo, has_target, has_cursor, index, index_sub, first, pick);
+    tr.count = 0; -- a batch cut short by an error is dropped
+    end_state();  -- always: the device states go back even when a draw errors
+    if (ok) then
+        frame.fails = 0;
+        return;
     end
-
-    if (has_target) then
-        draw_ring(index_sub, 'fill');
-        draw_ring(index, 'fill');
+    frame.fails = frame.fails + 1;
+    if (frame.fails >= 3) then error(err, 0); end -- fails every frame: the guard turns Rings off and prints it
+    if (not frame.noted) then
+        frame.noted = true;
+        note_skipped_frame(err, index);
     end
-
-    flush();
-
-    -- Bands stay additive so they glow on dark ground.
-    dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_ONE);
-
-    if (has_geo) then
-        draw_geo_rings('band');
-    end
-
-    if (has_target) then
-        draw_ring(index_sub, 'band');
-        draw_ring(index, 'band');
-    end
-
-    flush();
-
-    if (has_cursor) then -- over everything: normal blend, no depth test
-        dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_INVSRCALPHA);
-        dev:SetRenderState(C.D3DRS_ZENABLE, 0);
-        draw_cursor(index, pick and cfg.cursor_sub or cfg.cursor_color, 0);
-        draw_cursor(first, cfg.cursor_sub, CUR_RAISE);
-        flush();
-    end
-    end_state();
 end
 
 local function status_line()
