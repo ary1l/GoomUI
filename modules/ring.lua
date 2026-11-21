@@ -2114,6 +2114,16 @@ local function cursor_anchor(ent, index)
     return x + dx, h + dh, z + dz, 0;
 end
 
+-- 'sol: received nil for self' twice from ent:GetType at the top of cursor_anchor, while the same entity manager
+-- object answered just before (GetStatus in render) and just after (the skipped-frame note: index 45, same object
+-- ok, fresh object ok): a fault inside that one call, not a bad object or target. These run every frame, so LuaJIT
+-- compiles them; keep them interpreted to test whether the fault goes with the compiler (jit.off: no trace starts in
+-- them and a caller's trace aborts on entering them, LuaJIT lj_record.c rec_func_setup).
+if (jit ~= nil and jit.off ~= nil) then
+    jit.off(head_offset);
+    jit.off(cursor_anchor);
+end
+
 -- Drawing in box px: bx, by the box's top left on screen, s the size.
 local function cursor_fan(pts, cx, cy, bx, by, s, color) -- filled, from a centre point
     local n = #pts;
@@ -2320,9 +2330,10 @@ local function note_skipped_frame(err, index)
     local old = tr.ent;
     if (old ~= nil and index ~= nil and index ~= 0) then
         local ok_old = pcall(function () return old:GetStatus(index); end);
+        local ok_same = pcall(function () return old:GetType(index); end);
         local ok_new = pcall(function () return AshitaCore:GetMemoryManager():GetEntity():GetType(index); end);
-        diag = (' | index %d, same object: %s, fresh object: %s'):fmt(index, ok_old and 'ok' or 'fails',
-            ok_new and 'ok' or 'fails');
+        diag = (' | index %d, same object: %s, same call again: %s, fresh object: %s'):fmt(index,
+            ok_old and 'ok' or 'fails', ok_same and 'ok' or 'fails', ok_new and 'ok' or 'fails');
     end
     print(chat.header(addon.name):append(chat.error(
         ('Rings skipped a frame (they stay on; please report this line): %s%s'):fmt(line, diag))));
