@@ -767,6 +767,13 @@ local function split_fit(a, b, avail)
     return fit_text(a, half), fit_text(b, half)
 end
 
+-- Screen size for clip rects (imgui.GetIO().DisplaySize, as XIUI reads it); nil when unknown.
+local function display_size()
+    local ok, w, h = pcall(function () local d = imgui.GetIO().DisplaySize; return d.x, d.y end)
+    if ok and (tonumber(w) or 0) > 0 and (tonumber(h) or 0) > 0 then return w, h end
+    return nil
+end
+
 local function begin_panel(win_id, px, py, panel_col, accent)
     v_pos[1], v_pos[2] = px, py
     imgui.SetNextWindowPos(v_pos, ImGuiCond_Always)
@@ -783,10 +790,28 @@ local function begin_panel(win_id, px, py, panel_col, accent)
     if dl then
         -- imgui clips a window's draw list inside half the window padding (left /
         -- right) and the border (top / bottom): the stripe and frame sit on the
-        -- edges, so draw them with the whole window rect as the clip rect.
+        -- edges, so draw them with the whole window rect as the clip rect, kept on the
+        -- screen. imgui keeps every window's own clip rect on the screen (Begin: InnerClipRect
+        -- ClipWithFull the viewport), but PushClipRect(.., false) takes the rect as given. A
+        -- panel stacked above a bar near the top of the screen (menu, sub-target) reached
+        -- above it, and on a dgVoodoo + ReShade setup that panel drew stretched over the whole
+        -- game view: its plate as a full-screen tint, its stripe as a bar down the left edge.
+        local cx1, cy1, cx2, cy2 = wx, wy, wx + ww, wy + wh
+        local dw, dh = display_size()
+        if dw then
+            if cx1 < 0 then cx1 = 0 end
+            if cy1 < 0 then cy1 = 0 end
+            if cx2 > dw then cx2 = dw end
+            if cy2 > dh then cy2 = dh end
+        end
+        local clipped = false
+        if cx2 > cx1 and cy2 > cy1 then
+            v_p1[1], v_p1[2] = cx1, cy1
+            v_p2[1], v_p2[2] = cx2, cy2
+            clipped = pcall(dl.PushClipRect, dl, v_p1, v_p2, false)
+        end
         v_p1[1], v_p1[2] = wx, wy
         v_p2[1], v_p2[2] = wx + ww, wy + wh
-        local clipped = pcall(dl.PushClipRect, dl, v_p1, v_p2, false)
 
         -- Look tab > Panels: tinted (by kind) / dark / clear / framed, times opacity.
         -- Clear keeps a faint neutral plate so the text stays readable.
