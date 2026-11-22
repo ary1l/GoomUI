@@ -9,6 +9,7 @@ local ffi      = require('ffi')
 local imgui    = require('imgui')
 local settings = require('settings')
 local theme    = require('modules/theme')
+local dupes    = require('modules/dupes') -- resent 0x028 (modules/dupes.lua)
 local crumb    = require('modules/crumb') -- crash marker steps (modules/crumb.lua)
 local mobdebuff = require('modules/mobdebuff')
 
@@ -1372,6 +1373,7 @@ end
 function M.packet_in(e)
     if e.id == 0x028 then
         if e.size < 0x1D then return end   -- header + one target + first result (value ends at bit 230)
+        if dupes.repeated(e) then return end -- a resend: the cast already started / finished once
 
         -- Actor id (bits 40-71) first: most 0x028 traffic is other actors.
         local me = self_id_cache

@@ -1021,6 +1021,7 @@ local imgui = require('imgui');
 local theme = require('modules/theme');
 local ui    = require('modules/ui');
 local parse_action = require('modules/action');
+local dupes = require('modules/dupes'); -- resent 0x028 (modules/dupes.lua)
 
 -- 0x029 (XiPackets world/server/0x0029): UniqueNoCas, UniqueNoTar, Data, Data2, ActIndexCas, ActIndexTar, MessageNum.
 local function parse_message(d)
@@ -1034,6 +1035,7 @@ end
 function debuffHandler.packet_in(e)
     local id = e.id;
     if (id == 0x028) then
+        if (dupes.repeated(e)) then return; end
         local ok, a = pcall(parse_action, e);
         if (ok and a ~= nil) then ApplyMessage(debuffHandler.enemies, a); end
     elseif (id == 0x029) then

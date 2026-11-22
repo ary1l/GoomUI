@@ -11,6 +11,7 @@ local slib  = require('settings');
 local data  = require('modules/aaev_data');
 local theme = require('modules/theme');
 local parse_action = require('modules/action');
+local dupes = require('modules/dupes'); -- resent 0x028 (modules/dupes.lua)
 
 -- Ashita's ImGui (1.92.3) binding has no SetWindowFontScale: the text keeps its size and
 -- the fit logic falls back to dropping cells. IsItemDeactivatedAfterEdit: commit on release where bound.
@@ -623,6 +624,7 @@ end
 function M.packet_in(e)
     if (not settings.enabled) then return; end
     if (e.id == 0x028) then
+        if (dupes.repeated(e)) then return; end -- a resend: counted once
         handle_action(e);
     elseif (e.id == 0x00E) then
         handle_npc_update(e);
