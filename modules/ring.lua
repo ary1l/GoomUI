@@ -640,6 +640,12 @@ local function begin_state()
     local _, tex = dev:GetTexture(0);
     s.tex = tex;
 
+    -- DrawPrimitiveUP leaves stream 0 set to NULL (Direct3D 8 / 9 docs, DrawPrimitiveUP remarks), so the game's
+    -- vertex buffer goes back after the draw: a game that skips re-binding a buffer it thinks is still bound would
+    -- otherwise draw from nothing. GetStreamSource adds a reference: released in end_state.
+    local _, vb, stride = dev:GetStreamSource(0);
+    s.vb, s.stride = vb, stride;
+
     dev:SetTexture(0, nil);
     dev:SetTextureStageState(0, C.D3DTSS_COLOROP, C.D3DTOP_SELECTARG1);
     dev:SetTextureStageState(0, C.D3DTSS_COLORARG1, C.D3DTA_DIFFUSE);
@@ -669,6 +675,14 @@ local function end_state()
         s.tex:Release();
         s.tex = nil;
     end
+
+    if (s.stride ~= nil) then
+        dev:SetStreamSource(0, s.vb, s.stride);
+    end
+    if (s.vb ~= nil) then
+        s.vb:Release();
+    end
+    s.vb, s.stride = nil, nil;
 
     for i = 1, #TSS_SAVE do
         if (s.tss[i] ~= nil) then

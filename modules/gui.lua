@@ -89,6 +89,16 @@ local function tab_bar(c, bar)
     check(c, 'bar', 'Show JA flash bar', 'show_jabar');
     check(c, 'bar', 'Show debuffs on the targeted mob', 'show_debuffs');
     check(c, 'bar', 'Debuffs below the HP bar (default: above)', 'debuffs_below');
+    check(c, 'bar', 'Single bar: only the target panel (no pet, sub-target, cast, JA or menu panel)', 'single_bar');
+    imgui.Text('Extra panels stack');
+    for _, m in ipairs({ { 'auto', 'Auto' }, { 'up', 'Up' }, { 'down', 'Down' } }) do
+        imgui.SameLine();
+        if (imgui.Button((((c.stack or 'auto') == m[1]) and '> ' or '  ') .. m[2] .. '##thud_stack_' .. m[1])) then
+            c.stack = m[1];
+            settings.save('bar');
+        end
+    end
+    imgui.TextColored(DIM, 'Auto: above the target panel, or under it when they would not all fit above the bar.');
     check(c, 'bar', 'Show treasure pool window (lots and passes per member)', 'show_pool');
     check(c, 'bar', 'Treasure pool: one-line summary by the party list (click it for the window)', 'pool_dock');
     slider(c, 'bar', 'Debuff icon size##thud_dbsz', 'debuff_icon', 12, 32, '%.0f', true);
