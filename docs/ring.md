@@ -16,12 +16,14 @@ Rings on the ground under your target and sub-target: facing arrow, runes, rear 
 ## Target cursor
 
 A marker over your target's head, drawn over everything (Cursor tab or `/goomui cursor ...`). It does what the
-customtarget addon does: unload that one.
+customtarget addon does: unload that one. The game's own target arrow still shows above it: Party tab > *Game UI* >
+*Hide the game's target frame and target arrow* hides it (the arrow goes with the game's target frame, as with
+Ashita's *hideparty* addon). Unload hideparty if you use this.
 
 - **Styles:** *Gem* (light border, dark ring, lit facets; default), *Flat* (smooth centre), *Hollow* (outline only)
   and *Crystal* (an eight-faced crystal that turns; *Spin* off holds it still).
-- **Colours:** a palette colour (HP, MP, TP, Spell, Crit, WS, ...), so it follows the colour preset; White; or
-  *Target kind*, the ring colours (mobs, players, NPCs). Default MP.
+- **Colours:** a palette colour, listed by its colour and role (*Sky blue (MP)* under Vivid), so it follows the
+  colour preset; White; or *Target kind*, the ring colours (mobs, players, NPCs). Default MP.
 - **Sub-target colour:** the target you are picking (`<st>`), and item, `<stnpc>` and `<stpc>` picks. While you
   sub-target, your held target keeps a cursor in *Colour*, 10 px higher. Default TP ready.
 - **Float:** drifts up and down 2.5 px.

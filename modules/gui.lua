@@ -8,6 +8,7 @@ require('common');
 local imgui    = require('imgui');
 local settings = require('settings');
 local theme    = require('modules/theme');
+local hidegame = require('modules/hidegame');
 
 local G = { open = { false } };
 
@@ -135,15 +136,42 @@ local function cursor_f4(key)
     if (p == nil) then return theme.f4(245, 245, 245); end
     return theme.f4(p[1], p[2], p[3]);
 end
+-- A plain colour name from hue / lightness. The palette follows the colour preset, so the name is worked out from
+-- the colour the preset gives, not stored: 'Sky blue (MP)' under Vivid.
+local HUE_NAMES = { { 12, 'Red' }, { 38, 'Orange' }, { 64, 'Yellow' }, { 90, 'Lime' }, { 150, 'Green' },
+    { 172, 'Teal' }, { 195, 'Cyan' }, { 222, 'Sky blue' }, { 246, 'Blue' }, { 285, 'Purple' }, { 310, 'Magenta' },
+    { 340, 'Pink' }, { 361, 'Red' } };
+local function colour_name(r, g, b)
+    r, g, b = r / 255, g / 255, b / 255;
+    local mx, mn = math.max(r, g, b), math.min(r, g, b);
+    local l, d = (mx + mn) / 2, mx - mn;
+    if (d < 0.08) then return (l > 0.8) and 'White' or ((l < 0.2) and 'Black' or 'Grey'); end
+    local h;
+    if (mx == r) then h = 60 * (((g - b) / d) % 6);
+    elseif (mx == g) then h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4); end
+    local name = 'Red';
+    for _, e in ipairs(HUE_NAMES) do
+        if (h < e[1]) then name = e[2]; break; end
+    end
+    if (l >= 0.75) then name = 'Light ' .. name:lower(); elseif (l < 0.3) then name = 'Dark ' .. name:lower(); end
+    return name;
+end
+local function cursor_label(k)
+    local role = CURSOR_NAMES[k] or tostring(k);
+    local p = (k ~= 'white' and k ~= 'kind') and theme.P[k] or nil;
+    if (p == nil) then return role; end
+    return ('%s (%s)'):fmt(colour_name(p[1], p[2], p[3]), role);
+end
 local function cursor_colour(c, ring, label, key)
     local cur = c[key];
     imgui.ColorButton('##cur_' .. key, cursor_f4(cur), ImGuiColorEditFlags_NoTooltip, SWATCH);
     imgui.SameLine();
-    if (imgui.BeginCombo(label, CURSOR_NAMES[cur] or tostring(cur))) then
+    if (imgui.BeginCombo(label, cursor_label(cur))) then
         for _, k in ipairs(ring.CURSOR_COLORS) do
             imgui.ColorButton('##sw_' .. key .. k, cursor_f4(k), ImGuiColorEditFlags_NoTooltip, SWATCH);
             imgui.SameLine();
-            if (imgui.Selectable((CURSOR_NAMES[k] or k) .. '##' .. key .. k, k == cur)) then
+            if (imgui.Selectable(cursor_label(k) .. '##' .. key .. k, k == cur)) then
                 c[key] = k;
                 settings.save('ring');
             end
@@ -346,7 +374,7 @@ local function tab_look()
     imgui.TextColored(DIM, 'AAEV uses its own colours if Layout > goomui colours is off.');
 end
 
-local function tab_party(party)
+local function tab_party(party, c)
     local on = party.in_setup();
     if (imgui.Button(on and 'Save + close party setup##gui_psetup' or 'Party setup: drag lists + options##gui_psetup')) then
         party.toggle_setup();
@@ -359,6 +387,17 @@ local function tab_party(party)
     imgui.TextColored(DIM, 'Setup opens drag boxes for party / alliance 1 / alliance 2');
     imgui.TextColored(DIM, 'and the list options window (buffs, filters, crew hover, sizes).');
     imgui.TextColored(DIM, '/goomui setup does the same. /goomui crew = crew link status.');
+
+    imgui.Separator();
+    imgui.TextColored(HEADER, "Game UI: hide the game's own frames (this char)");
+    check(c, 'bar', "Hide the game's party list##gui_hide_party", 'hide_game_party');
+    check(c, 'bar', "Hide the game's alliance lists##gui_hide_ally", 'hide_game_alliance');
+    check(c, 'bar', "Hide the game's target frame and target arrow##gui_hide_target", 'hide_game_target');
+    if (not hidegame.available()) then
+        imgui.TextColored({ 1.0, 0.45, 0.40, 1.0 }, 'Not found in this client: these do nothing.');
+    end
+    imgui.TextColored(DIM, "Target frame: the game's target arrow goes with it (goomui's cursor takes its place).");
+    imgui.TextColored(DIM, "Same as Ashita's hideparty: unload hideparty if you use these, it keeps showing them.");
 end
 
 function G.toggle() G.open[1] = not G.open[1]; end
@@ -376,7 +415,7 @@ function G.render(cfg, bar, ring, aaev, party)
                 imgui.EndTabItem();
             end
             if (party ~= nil and imgui.BeginTabItem('Party##thud_tab_party')) then
-                tab_party(party);
+                tab_party(party, bar_cfg);
                 imgui.EndTabItem();
             end
             if (imgui.BeginTabItem('Bar##thud_tab_bar')) then

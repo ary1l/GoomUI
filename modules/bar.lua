@@ -54,6 +54,9 @@ local default_cfg = T{
     stack         = 'auto',  -- extra panels (pet, sub-target, cast, JA, menu): 'up' above the target panel, 'down'
                              -- under it, 'auto' up unless they would not all fit above the bar
     single_bar    = false,   -- only the target panel: no pet / sub-target / cast / JA / menu panels
+    hide_game_party    = false, -- the game's own party list hidden (modules/hidegame.lua, Party tab > Game UI)
+    hide_game_alliance = false, -- the game's alliance lists hidden
+    hide_game_target   = false, -- the game's target frame hidden, and with it the game's target arrow
     locked        = true,
     theme         = 'vivid', -- colour preset for every goomui bar (modules/theme.lua)
     bar_style     = 'soft',  -- bar shape: soft / flat / glass
