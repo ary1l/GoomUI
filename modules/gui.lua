@@ -135,15 +135,42 @@ local function cursor_f4(key)
     if (p == nil) then return theme.f4(245, 245, 245); end
     return theme.f4(p[1], p[2], p[3]);
 end
+-- A plain colour name from hue / lightness. The palette follows the colour preset, so the name is worked out from
+-- the colour the preset gives, not stored: 'Sky blue (MP)' under Vivid.
+local HUE_NAMES = { { 12, 'Red' }, { 38, 'Orange' }, { 64, 'Yellow' }, { 90, 'Lime' }, { 150, 'Green' },
+    { 172, 'Teal' }, { 195, 'Cyan' }, { 222, 'Sky blue' }, { 246, 'Blue' }, { 285, 'Purple' }, { 310, 'Magenta' },
+    { 340, 'Pink' }, { 361, 'Red' } };
+local function colour_name(r, g, b)
+    r, g, b = r / 255, g / 255, b / 255;
+    local mx, mn = math.max(r, g, b), math.min(r, g, b);
+    local l, d = (mx + mn) / 2, mx - mn;
+    if (d < 0.08) then return (l > 0.8) and 'White' or ((l < 0.2) and 'Black' or 'Grey'); end
+    local h;
+    if (mx == r) then h = 60 * (((g - b) / d) % 6);
+    elseif (mx == g) then h = 60 * ((b - r) / d + 2);
+    else h = 60 * ((r - g) / d + 4); end
+    local name = 'Red';
+    for _, e in ipairs(HUE_NAMES) do
+        if (h < e[1]) then name = e[2]; break; end
+    end
+    if (l >= 0.75) then name = 'Light ' .. name:lower(); elseif (l < 0.3) then name = 'Dark ' .. name:lower(); end
+    return name;
+end
+local function cursor_label(k)
+    local role = CURSOR_NAMES[k] or tostring(k);
+    local p = (k ~= 'white' and k ~= 'kind') and theme.P[k] or nil;
+    if (p == nil) then return role; end
+    return ('%s (%s)'):fmt(colour_name(p[1], p[2], p[3]), role);
+end
 local function cursor_colour(c, ring, label, key)
     local cur = c[key];
     imgui.ColorButton('##cur_' .. key, cursor_f4(cur), ImGuiColorEditFlags_NoTooltip, SWATCH);
     imgui.SameLine();
-    if (imgui.BeginCombo(label, CURSOR_NAMES[cur] or tostring(cur))) then
+    if (imgui.BeginCombo(label, cursor_label(cur))) then
         for _, k in ipairs(ring.CURSOR_COLORS) do
             imgui.ColorButton('##sw_' .. key .. k, cursor_f4(k), ImGuiColorEditFlags_NoTooltip, SWATCH);
             imgui.SameLine();
-            if (imgui.Selectable((CURSOR_NAMES[k] or k) .. '##' .. key .. k, k == cur)) then
+            if (imgui.Selectable(cursor_label(k) .. '##' .. key .. k, k == cur)) then
                 c[key] = k;
                 settings.save('ring');
             end
