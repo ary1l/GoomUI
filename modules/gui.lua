@@ -392,12 +392,12 @@ local function tab_party(party, c)
     imgui.TextColored(HEADER, "Game UI: hide the game's own frames (this char)");
     check(c, 'bar', "Hide the game's party list##gui_hide_party", 'hide_game_party');
     check(c, 'bar', "Hide the game's alliance lists##gui_hide_ally", 'hide_game_alliance');
-    check(c, 'bar', "Hide the game's target frame##gui_hide_target", 'hide_game_target');
+    check(c, 'bar', "Hide the game's target frame and target arrow##gui_hide_target", 'hide_game_target');
     if (not hidegame.available()) then
         imgui.TextColored({ 1.0, 0.45, 0.40, 1.0 }, 'Not found in this client: these do nothing.');
     end
-    imgui.TextColored(DIM, "The game's target arrow goes when its frames are hidden (as with Ashita's hideparty).");
-    imgui.TextColored(DIM, 'Unload hideparty if you use these: it keeps showing them.');
+    imgui.TextColored(DIM, "Target frame: the game's target arrow goes with it (goomui's cursor takes its place).");
+    imgui.TextColored(DIM, "Same as Ashita's hideparty: unload hideparty if you use these, it keeps showing them.");
 end
 
 function G.toggle() G.open[1] = not G.open[1]; end

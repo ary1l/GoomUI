@@ -4,7 +4,8 @@
 *
 * Method of Ashita's bundled hideparty addon (atom0s): two signatures give the frames' objects; each frame, a hidden
 * frame's primitive gets its two visibility bytes set to 0 (+0x69 and +0x6A of the object pointed to at +0x08 of the
-* frame object). atom0s notes the game's stock target cursor goes too when its frames are hidden.
+* frame object). Hiding the target frame also hides the game's target arrow (checked in game), the stock target cursor
+* atom0s notes losing when hideparty hides the frames.
 *
 * Only frames switched on here are written. One switched back off (or goomui unloaded) is shown once and then left
 * alone, so the game and other addons keep control of it. Do not run hideparty as well: while loaded it writes
