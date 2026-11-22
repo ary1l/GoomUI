@@ -170,6 +170,7 @@ ashita.events.register('load', 'thud_load', function ()
     aaev.init();
     aaev.on_config = gui.open_window;
     aaev.anchor_fn = bar.anchor;   -- docked AAEV chart follows the target bar
+    aaev.dock_report = bar.set_dock_h; -- and the bar's downward stack starts under it
     gui.on_theme = function (name)
         if (cfg.bar == nil) then return; end
         cfg.bar.theme = name;

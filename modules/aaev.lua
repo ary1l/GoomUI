@@ -297,7 +297,7 @@ local function chart_bars(log_type)
 end
 
 -- Docked: player chart width follows the target bar (set per frame in M.render).
-local dock = { on = false, x = 0, y = 0, w = 0, win_w = 0, pad = { 12, 4 } };
+local dock = { on = false, x = 0, y = 0, w = 0, h = 0, win_w = 0, pad = { 12, 4 } };
 -- Chat strip: player chart as one line under the chat log (set per frame in M.render).
 local strip = { on = false, x = 0, y = 0, w = 0, h = 15, bw = 100, bh = 11, n = 25, pad = { 3, 1 }, sp = { 4, 0 } };
 
@@ -1378,6 +1378,7 @@ local function draw_chart(log_type)
     end
 
     if (imgui.Begin(WIN_NAME[log_type], nil, flags)) then
+        if (docked) then local _, wh = imgui.GetWindowSize(); dock.h = wh or 0; end
         -- Label rows + fit scale rebuilt only when this log, zone stats or settings change.
         local lc = row_cache[log_type];
         local zv = (log_type == TYPE_PLAYER) and zone_stats.v or 0;
@@ -1654,9 +1655,12 @@ function M.render()
 
     local show_player = state.visible[TYPE_PLAYER] or settings.AlwaysShow;
     if (state.forced_hidden) then show_player = false; end
+    dock.h = 0;
     if (show_player) then
         if (strip.on) then draw_strip(TYPE_PLAYER); else draw_chart(TYPE_PLAYER); end
     end
+    -- The target bar stacks its extra panels under a docked chart (bar.lua 'down').
+    if (dock.on and dock.h > 0 and M.dock_report ~= nil) then pcall(M.dock_report, dock.h); end
     strip.on = false;   -- pet chart always uses its own size
     if (state.visible[TYPE_PET] and settings.PetChart and data.pet_jobs[state.last_job]) then
         draw_chart(TYPE_PET);

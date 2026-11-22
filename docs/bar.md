@@ -8,6 +8,11 @@ debuff row above it), cast, job ability and menu recast above it. The AAEV chart
 Bar tab > *Debuffs below the HP bar* puts each mob's debuff row under its target panel instead (everything else
 still stacks upward). A docked AAEV chart then sits under the main target's row.
 
+Bar tab > *Extra panels stack*: **Auto** (default) stacks them upward, or downward when they would not all fit above the
+bar (a bar near the top of the screen). **Down** always puts them under the target panel: its debuff row, a docked AAEV
+chart, then pet, sub-target (debuffs under it), cast, job ability and menu recast. **Up** is the old behaviour.
+*Single bar* shows the target panel only (no pet, sub-target, cast, JA or menu panel).
+
 - **Move:** Bar tab, uncheck *Lock position*, drag the handle, check it again. Or type X / Y.
 - **Size:** Bar tab, Width / Height.
 - **Shows:** distance (coloured by range, hitboxes counted when *Range colors account for hitbox size* is on),

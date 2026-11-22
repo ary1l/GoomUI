@@ -51,6 +51,9 @@ local default_cfg = T{
     pool_dock     = true,    -- a one-line summary by the party list; click it for the full window (false: window only)
     pool_open     = false,   -- the full window shown (docked: toggled by clicking the summary)
     debuffs_below = false,   -- debuff row under its target panel instead of above (other panels still stack up)
+    stack         = 'auto',  -- extra panels (pet, sub-target, cast, JA, menu): 'up' above the target panel, 'down'
+                             -- under it, 'auto' up unless they would not all fit above the bar
+    single_bar    = false,   -- only the target panel: no pet / sub-target / cast / JA / menu panels
     locked        = true,
     theme         = 'vivid', -- colour preset for every goomui bar (modules/theme.lua)
     bar_style     = 'soft',  -- bar shape: soft / flat / glass
@@ -274,7 +277,7 @@ local function refresh_managers()
     mgr.entity = mm:GetEntity()
 end
 
-local rcache = { bw = 400, bh = 14, win_w = 0, h_main = 32, h_sub = 24, h_cast = 28, h_ja = 22, h_menu = 28, h_debuff = 30, h_debuff_sub = 30, bar_dx = 12 }
+local rcache = { bw = 400, bh = 14, win_w = 0, h_main = 32, h_sub = 24, h_cast = 28, h_ja = 22, h_menu = 28, h_debuff = 30, h_debuff_sub = 30, bar_dx = 12, dock_h = 0 }
 
 -- The GUI writes bar_width/bar_height live while a value is being typed; draw
 -- with clamped copies so a half-typed '1' or '-' never reaches Dummy/AddRect.
@@ -964,6 +967,8 @@ function M.anchor()
     return cfg.pos_x, cfg.pos_y + rcache.h_main + (rcache.h_below or 0), rcache.win_w, rcache.bar_dx, rcache.bw
 end
 function M.force_handle() force_handle = true end
+-- The docked AAEV chart's height (aaev, each frame; 0 when not docked or hidden): the down stack starts under it.
+function M.set_dock_h(h) rcache.dock_h, rcache.dock_at = math.max(0, tonumber(h) or 0), os.clock() end
 
 function M.unload()
     main_data = nil
@@ -1749,20 +1754,31 @@ function M.render()
         pet.data  = nil
     end
 
-    -- Panels stack upward from pos_y: target at the bottom, the rest above it. With cfg.debuffs_below each mob's
-    -- debuff row goes under its target panel instead of above it.
+    -- Panels stack from pos_y: the target panel at pos_y, the extra panels (pet, sub-target, cast, JA, menu) above it
+    -- ('up') or under it ('down'). 'auto' stacks down when the tallest stack would not fit above the bar, so a bar near
+    -- the top of the screen keeps them on screen (they used to go above it). Up: with cfg.debuffs_below the main debuff
+    -- row goes under the target panel instead of above. Down: every debuff row goes under its panel, and the extra
+    -- panels start under the target panel, its debuff row and the docked AAEV chart.
     local below = cfg.debuffs_below
+    local extras = not cfg.single_bar
+    local mode = cfg.stack or 'auto'
+    local down = (mode == 'down')
+    if mode == 'auto' then
+        local tallest = rcache.h_debuff + DEBUFF_GAP + pet.bar_h + rcache.h_sub + rcache.h_debuff_sub + DEBUFF_GAP
+            + rcache.h_cast + rcache.h_ja + rcache.h_menu
+        down = cfg.pos_y < tallest
+    end
     local y = cfg.pos_y
     rcache.h_below = 0
 
     if main_data then
         -- Blue = the target being picked: the sub panel while sub-targeting, else main when a target menu is up.
-        local force_blue = (sub_data == nil) and (last_menu_text ~= '')
+        local force_blue = (sub_data == nil or not extras) and (last_menu_text ~= '')
         local mh, npc_pad = draw_bar(main_data, '##thud_main', px, y,
             bh, false, force_blue, last_menu_text, bw, cfg.show_distance, cfg.show_height)
         rcache.h_main = mh and (mh + npc_pad) or rcache.h_main
         if debuff_shown(main_data) then
-            if below then
+            if below or down then
                 draw_debuff_row(main_data, px, y + rcache.h_main, bw, '##thud_debuff', 'h_debuff', force_blue)
                 rcache.h_below = rcache.h_debuff
             else
@@ -1773,53 +1789,82 @@ function M.render()
         end
     end
 
-    if pet.data then
-        y = y - pet.bar_h
-        pet.bar_h = draw_bar(pet.data, '##thud_pet', px, y,
-            bh, false, false, nil, bw, cfg.show_distance, cfg.show_height) or pet.bar_h
+    -- Down: the next panel's top. Under the target panel's slot even with no target, so panels do not jump.
+    -- A chart height not reported in the last 0.25 s is gone (AAEV off, hidden or undocked).
+    local dock_h = (os.clock() - (rcache.dock_at or -1) < 0.25) and rcache.dock_h or 0
+    local dy = cfg.pos_y + rcache.h_main + rcache.h_below + ((dock_h > 0) and (dock_h + 1) or 0)
+    if down and rcache.h_below > 0 then dy = dy + DEBUFF_GAP end
+    -- y for the next extra panel of height h; after drawing it, advance(h) moves the down stack past it.
+    local function slot(h)
+        if down then return dy end
+        y = y - h
+        return y
+    end
+    local function advance(h)
+        if down then dy = dy + h end
     end
 
-    if sub_data then
+    if extras and pet.data then
+        local py = slot(pet.bar_h)
+        pet.bar_h = draw_bar(pet.data, '##thud_pet', px, py,
+            bh, false, false, nil, bw, cfg.show_distance, cfg.show_height) or pet.bar_h
+        advance(pet.bar_h)
+    end
+
+    if extras and sub_data then
         -- same mob as the main target: its row is already on the main panel
         local sub_db = not (main_data and main_data.sid == sub_data.sid) and debuff_shown(sub_data)
-        local db_top
-        if sub_db and below then -- row first (under the sub panel), gap below it
-            y = y - DEBUFF_GAP - rcache.h_debuff_sub
-            db_top = y
-        end
-        y = y - rcache.h_sub
-        rcache.h_sub = draw_bar(sub_data, '##thud_sub', px, y,
-            bh, true, true, last_menu_text, bw, cfg.show_distance, cfg.show_height) or rcache.h_sub
-        if sub_db then
-            if not below then
-                y = y - rcache.h_debuff_sub
-                db_top = y
-                y = y - DEBUFF_GAP
+        if down then
+            rcache.h_sub = draw_bar(sub_data, '##thud_sub', px, dy,
+                bh, true, true, last_menu_text, bw, cfg.show_distance, cfg.show_height) or rcache.h_sub
+            dy = dy + rcache.h_sub
+            if sub_db then
+                draw_debuff_row(sub_data, px, dy, bw, '##thud_debuff_sub', 'h_debuff_sub', true)
+                dy = dy + rcache.h_debuff_sub + DEBUFF_GAP
             end
-            draw_debuff_row(sub_data, px, db_top, bw, '##thud_debuff_sub', 'h_debuff_sub', true)
+        else
+            local db_top
+            if sub_db and below then -- row first (under the sub panel), gap below it
+                y = y - DEBUFF_GAP - rcache.h_debuff_sub
+                db_top = y
+            end
+            y = y - rcache.h_sub
+            rcache.h_sub = draw_bar(sub_data, '##thud_sub', px, y,
+                bh, true, true, last_menu_text, bw, cfg.show_distance, cfg.show_height) or rcache.h_sub
+            if sub_db then
+                if not below then
+                    y = y - rcache.h_debuff_sub
+                    db_top = y
+                    y = y - DEBUFF_GAP
+                end
+                draw_debuff_row(sub_data, px, db_top, bw, '##thud_debuff_sub', 'h_debuff_sub', true)
+            end
         end
     end
 
     -- Also at 100% before the server's finish arrives, so the bar does not blink out.
-    if has_cast and (cast_state.done_at > 0 or disp_frac > 0) then
-        y = y - rcache.h_cast
+    if extras and has_cast and (cast_state.done_at > 0 or disp_frac > 0) then
+        local cy = slot(rcache.h_cast)
         rcache.h_cast = draw_cast_bar((cast_state.done_at > 0) and cast_state.done_frac or cast_state.render_frac,
-            px, y, bw) or rcache.h_cast
+            px, cy, bw) or rcache.h_cast
+        advance(rcache.h_cast)
     end
 
-    if cfg.show_jabar and now < ja_state.expires then
-        y = y - rcache.h_ja
-        rcache.h_ja = draw_ja_bar(px, y) or rcache.h_ja
+    if extras and cfg.show_jabar and now < ja_state.expires then
+        local jy = slot(rcache.h_ja)
+        rcache.h_ja = draw_ja_bar(px, jy) or rcache.h_ja
+        advance(rcache.h_ja)
     end
 
-    if cfg.show_menuinfo then
+    if extras and cfg.show_menuinfo then
         if now - last_menu_update > MENU_UPDATE then
             last_menu_update = now
             rebuild_menu_info()
         end
         if menu_cache.active then
-            y = y - rcache.h_menu
-            rcache.h_menu = draw_menu_panel(px, y) or rcache.h_menu
+            local my = slot(rcache.h_menu)
+            rcache.h_menu = draw_menu_panel(px, my) or rcache.h_menu
+            advance(rcache.h_menu)
         end
     end
 
