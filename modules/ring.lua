@@ -12,6 +12,7 @@ local settings  = require('settings');
 local theme     = require('modules/theme');  -- the target cursor's palette colours
 local C         = ffi.C;
 local parse_action = require('modules/action');
+local dupes     = require('modules/dupes'); -- resent 0x028 (modules/dupes.lua)
 local ui        = require('modules/ui');
 local crumb     = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
 local dev       = d3d.get_device();
@@ -1909,6 +1910,7 @@ function M.packet_in(e)
     if (not cfg.geo) then return; end
 
     if (e.id == 0x028) then
+        if (dupes.repeated(e)) then return; end
         local ok, act = pcall(action_view, e);
         if (ok and act ~= nil) then
             pcall(apply_action_tags, act);
