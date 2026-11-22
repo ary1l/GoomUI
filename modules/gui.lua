@@ -8,6 +8,7 @@ require('common');
 local imgui    = require('imgui');
 local settings = require('settings');
 local theme    = require('modules/theme');
+local hidegame = require('modules/hidegame');
 
 local G = { open = { false } };
 
@@ -373,7 +374,7 @@ local function tab_look()
     imgui.TextColored(DIM, 'AAEV uses its own colours if Layout > goomui colours is off.');
 end
 
-local function tab_party(party)
+local function tab_party(party, c)
     local on = party.in_setup();
     if (imgui.Button(on and 'Save + close party setup##gui_psetup' or 'Party setup: drag lists + options##gui_psetup')) then
         party.toggle_setup();
@@ -386,6 +387,17 @@ local function tab_party(party)
     imgui.TextColored(DIM, 'Setup opens drag boxes for party / alliance 1 / alliance 2');
     imgui.TextColored(DIM, 'and the list options window (buffs, filters, crew hover, sizes).');
     imgui.TextColored(DIM, '/goomui setup does the same. /goomui crew = crew link status.');
+
+    imgui.Separator();
+    imgui.TextColored(HEADER, "Game UI: hide the game's own frames (this char)");
+    check(c, 'bar', "Hide the game's party list##gui_hide_party", 'hide_game_party');
+    check(c, 'bar', "Hide the game's alliance lists##gui_hide_ally", 'hide_game_alliance');
+    check(c, 'bar', "Hide the game's target frame##gui_hide_target", 'hide_game_target');
+    if (not hidegame.available()) then
+        imgui.TextColored({ 1.0, 0.45, 0.40, 1.0 }, 'Not found in this client: these do nothing.');
+    end
+    imgui.TextColored(DIM, "The game's target arrow goes when its frames are hidden (as with Ashita's hideparty).");
+    imgui.TextColored(DIM, 'Unload hideparty if you use these: it keeps showing them.');
 end
 
 function G.toggle() G.open[1] = not G.open[1]; end
@@ -403,7 +415,7 @@ function G.render(cfg, bar, ring, aaev, party)
                 imgui.EndTabItem();
             end
             if (party ~= nil and imgui.BeginTabItem('Party##thud_tab_party')) then
-                tab_party(party);
+                tab_party(party, bar_cfg);
                 imgui.EndTabItem();
             end
             if (imgui.BeginTabItem('Bar##thud_tab_bar')) then

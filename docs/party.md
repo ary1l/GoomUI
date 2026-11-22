@@ -14,6 +14,9 @@ range, per-list scale, font. `/goomui setup` again, or *Save + close*, saves.
   (stacked, or side by side with *Snap stacks alliances vertically* off).
 - Lists are kept fully on screen.
 
+**Game UI** (Party tab, per character): hide the game's own party list, alliance lists and target frame. The game's
+target arrow goes with them. Same method as Ashita's *hideparty* addon (atom0s); unload hideparty if you use these.
+
 ## A row
 
 ![In game: job colours, leader star, buffs and debuffs, distance (names pixelated)](party.png)

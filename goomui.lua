@@ -15,6 +15,7 @@ local party    = require('modules/party');   -- registers its own draw / packet 
 local theme    = require('modules/theme');
 local mobdebuff = require('modules/mobdebuff');
 local pool     = require('modules/pool');
+local hidegame = require('modules/hidegame'); -- the game's own party / alliance / target frames (Party tab)
 local crumb    = require('modules/crumb');  -- crash marker: names the step a native crash happened in
 
 --[[
@@ -205,6 +206,7 @@ ashita.events.register('load', 'thud_load', function ()
 end);
 
 ashita.events.register('unload', 'thud_unload', function ()
+    pcall(hidegame.restore);
     bar.unload();
     aaev.unload();
     settings.save('bar');
@@ -259,6 +261,7 @@ ashita.events.register('d3d_present', 'thud_bar_draw',  guard('Target bar', func
 ashita.events.register('d3d_present', 'thud_pool_draw', guard('Treasure pool window', function () pool.render(); end));
 ashita.events.register('d3d_present', 'thud_aaev_draw', guard('AAEV', function () aaev.render(); end));
 ashita.events.register('d3d_present', 'thud_gui_draw',  guard('Settings window', function () gui.render(cfg, bar, ring, aaev, party); end));
+ashita.events.register('d3d_present', 'thud_hidegame',  guard('Game UI hiding', function () hidegame.apply(cfg.bar); end, true));
 
 -- /goomui look ...: preset by name or next / prev; shape / texture / frame.
 local function look_command(a, b, args)

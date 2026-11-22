@@ -16,9 +16,10 @@ Rings on the ground under your target and sub-target: facing arrow, runes, rear 
 ## Target cursor
 
 A marker over your target's head, drawn over everything (Cursor tab or `/goomui cursor ...`). It does what the
-customtarget addon does: unload that one. The game's own target arrow still shows above it: Ashita's bundled
-*hideparty* addon (`/addon load hideparty`, `/hideparty hide`) hides it, together with the game's party frames
-(atom0s notes losing the stock target cursor is a side effect of hiding them).
+customtarget addon does: unload that one. The game's own target arrow still shows above it: Party tab > *Game UI*
+hides the game's party list, alliance lists and target frame, and the arrow goes with them (as with Ashita's
+*hideparty* addon; atom0s notes losing the stock target cursor is a side effect of hiding them). Unload hideparty
+if you use these.
 
 - **Styles:** *Gem* (light border, dark ring, lit facets; default), *Flat* (smooth centre), *Hollow* (outline only)
   and *Crystal* (an eight-faced crystal that turns; *Spin* off holds it still).
