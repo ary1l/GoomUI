@@ -971,6 +971,37 @@ function M.anchor()
     return cfg.pos_x, cfg.pos_y + rcache.h_main + (rcache.h_below or 0), rcache.win_w, rcache.bar_dx, rcache.bw
 end
 function M.force_handle() force_handle = true end
+
+-- /goomui tinfo: what the target bar reads for the current target(s), for a target it does not show.
+function M.target_info()
+    local mm2 = AshitaCore:GetMemoryManager()
+    local t, ent = mm2:GetTarget(), mm2:GetEntity()
+    local out = {}
+    out[#out + 1] = ('sub active %s | slot0 idx %d (active %s) | slot1 idx %d (active %s)'):format(
+        tostring(t:GetIsSubTargetActive()), t:GetTargetIndex(0), tostring(t:GetIsActive(0)),
+        t:GetTargetIndex(1), tostring(t:GetIsActive(1)))
+    for slot = 0, 1 do
+        local i = t:GetTargetIndex(slot)
+        if i ~= 0 then
+            local ok, line = pcall(function ()
+                return ('slot%d idx %d: name %q, server id 0x%08X, spawn 0x%X, type %s, render0 0x%X, hp %s%%, dist %.1f, actor 0x%X'):format(
+                    slot, i, tostring(ent:GetName(i)), ent:GetServerId(i) or 0, ent:GetSpawnFlags(i) or 0,
+                    tostring(ent:GetType(i)), ent:GetRenderFlags0(i) or 0, tostring(ent:GetHPPercent(i)),
+                    math.sqrt(math.max(0, ent:GetDistance(i) or 0)), ent:GetActorPointer(i) or 0)
+            end)
+            out[#out + 1] = ok and line or ('slot%d idx %d: read failed: %s'):format(slot, i, tostring(line))
+        end
+    end
+    local okw, wline = pcall(function ()
+        return ('game target window: name %q, loaded %s, server id 0x%08X, hp %s%%, my room callback %s'):format(
+            tostring(t:GetWindowName()), tostring(t:GetWindowIsWindowLoaded()), t:GetWindowServerId() or 0,
+            tostring(t:GetWindowHPPercent()), (t:GetMyroomCallback() or 0) ~= 0 and 'set' or 'none')
+    end)
+    out[#out + 1] = okw and wline or ('game target window: read failed: ' .. tostring(wline))
+    out[#out + 1] = ('bar shows: main %s, sub %s'):format(main_data and ('"' .. tostring(main_data.raw_name) .. '"') or 'nothing',
+        sub_data and ('"' .. tostring(sub_data.raw_name) .. '"') or 'nothing')
+    return out
+end
 -- The docked AAEV chart's height (aaev, each frame; 0 when not docked or hidden): the down stack starts under it.
 function M.set_dock_h(h) rcache.dock_h, rcache.dock_at = math.max(0, tonumber(h) or 0), os.clock() end
 
@@ -1066,6 +1097,20 @@ local function apply_hp(cache, hp_pct)
     cache.hp_frac   = math.max(0.0, math.min(1.0, hp_pct / 100.0))
     cache.bar_color = cache.dead and C.BAR_DEAD
                     or HP_COLOR_LUT[math.max(0, math.min(100, hp_pct))]
+end
+
+-- A target with no entity behind it (target slot active, index 0): the Mog House exit ('Select area to exit to.')
+-- and the like. The game's own target window still names it (ITarget GetWindowName): a name-only panel, as for NPCs.
+-- is_self only keeps draw_bar from reading a distance / height there is none of.
+local window_cache = { is_self = true, is_real_npc = true, raw_name = '', display_name = '' }
+local function window_target(targ)
+    local ok, name = pcall(function () return targ:GetWindowName() end)
+    if not ok or type(name) ~= 'string' or name == '' then return nil end
+    if window_cache.raw_name ~= name then
+        window_cache.raw_name, window_cache.display_name = name, name
+    end
+    window_cache.name_color = C.NPC
+    return window_cache
 end
 
 local function parse_target_data(tIdx, out_cache, _, entity, targ)
@@ -1736,6 +1781,9 @@ function M.render()
 
             main_data = (main_idx ~= 0)
                 and parse_target_data(main_idx, main_target_cache, false, entity, targ) or nil
+            if main_data == nil and main_idx == 0 and targ:GetIsActive(0) ~= 0 then
+                main_data = window_target(targ)
+            end
 
             sub_data  = (sub_idx ~= 0)
                 and parse_target_data(sub_idx, sub_target_cache, true, entity, targ) or nil

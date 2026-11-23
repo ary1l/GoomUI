@@ -310,6 +310,7 @@ local HELP = {
     '/goomui setup                   party list setup: drag lists, list options (again = save)',
     '/goomui lowfi | crew | perf     party: low-fi toggle / crew link status / 10 s timing',
     '/goomui tdebug                  party: target-marker diagnostics',
+    '/goomui tinfo                   target bar: what it reads for your current target (one it does not show)',
     '/goomui pool [demo|open|dock]   treasure pool on/off / sample items / full window / summary by the party',
     '/goomui look [next|prev|<preset>] colour preset (no word = show current)',
     '/goomui look shape soft|flat|glass | texture none|segmented|striped|quarters|scanline|fade | frame [on|off]',
@@ -341,6 +342,8 @@ ashita.events.register('command', 'thud_command', function (e)
     elseif (sub == 'pool') then
         local m = pool.command(args[3] and args[3]:lower() or nil);
         if (m ~= nil) then say(m); end
+    elseif (sub == 'tinfo') then
+        for _, line in ipairs(bar.target_info()) do say(line); end
     elseif (sub == 'scale') then
         if (args[3] ~= nil and tonumber(args[3]) ~= nil) then gui.on_scale(tonumber(args[3])); end
         say(('UI scale x%.2f (0.5 - 3). /goomui scale <n>'):fmt(theme.ui_scale));
