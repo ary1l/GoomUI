@@ -971,6 +971,31 @@ function M.anchor()
     return cfg.pos_x, cfg.pos_y + rcache.h_main + (rcache.h_below or 0), rcache.win_w, rcache.bar_dx, rcache.bw
 end
 function M.force_handle() force_handle = true end
+
+-- /goomui tinfo: what the target bar reads for the current target(s), for a target it does not show.
+function M.target_info()
+    local mm2 = AshitaCore:GetMemoryManager()
+    local t, ent = mm2:GetTarget(), mm2:GetEntity()
+    local out = {}
+    out[#out + 1] = ('sub active %s | slot0 idx %d (active %s) | slot1 idx %d (active %s)'):format(
+        tostring(t:GetIsSubTargetActive()), t:GetTargetIndex(0), tostring(t:GetIsActive(0)),
+        t:GetTargetIndex(1), tostring(t:GetIsActive(1)))
+    for slot = 0, 1 do
+        local i = t:GetTargetIndex(slot)
+        if i ~= 0 then
+            local ok, line = pcall(function ()
+                return ('slot%d idx %d: name %q, server id 0x%08X, spawn 0x%X, type %s, render0 0x%X, hp %s%%, dist %.1f, actor 0x%X'):format(
+                    slot, i, tostring(ent:GetName(i)), ent:GetServerId(i) or 0, ent:GetSpawnFlags(i) or 0,
+                    tostring(ent:GetType(i)), ent:GetRenderFlags0(i) or 0, tostring(ent:GetHPPercent(i)),
+                    math.sqrt(math.max(0, ent:GetDistance(i) or 0)), ent:GetActorPointer(i) or 0)
+            end)
+            out[#out + 1] = ok and line or ('slot%d idx %d: read failed: %s'):format(slot, i, tostring(line))
+        end
+    end
+    out[#out + 1] = ('bar shows: main %s, sub %s'):format(main_data and ('"' .. tostring(main_data.raw_name) .. '"') or 'nothing',
+        sub_data and ('"' .. tostring(sub_data.raw_name) .. '"') or 'nothing')
+    return out
+end
 -- The docked AAEV chart's height (aaev, each frame; 0 when not docked or hidden): the down stack starts under it.
 function M.set_dock_h(h) rcache.dock_h, rcache.dock_at = math.max(0, tonumber(h) or 0), os.clock() end
 
