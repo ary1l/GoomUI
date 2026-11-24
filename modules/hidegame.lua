@@ -1,5 +1,5 @@
 --[[
-* goomui: hide the game's own party list, alliance lists and target frame (Party tab > Game UI), for goomui's party
+* goomui: hide the game's own party list, alliance lists and target frame (Party list page > Game UI), for goomui's party
 * list and target cursor in their place.
 *
 * Method of Ashita's bundled hideparty addon (atom0s): two signatures give the frames' objects; each frame, a hidden

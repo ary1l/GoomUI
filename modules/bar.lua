@@ -55,7 +55,7 @@ local default_cfg = T{
     stack         = 'auto',  -- extra panels (pet, sub-target, cast, JA, menu): 'up' above the target panel, 'down'
                              -- under it, 'auto' up unless they would not all fit above the bar
     single_bar    = false,   -- only the target panel: no pet / sub-target / cast / JA / menu panels
-    hide_game_party    = false, -- the game's own party list hidden (modules/hidegame.lua, Party tab > Game UI)
+    hide_game_party    = false, -- the game's own party list hidden (modules/hidegame.lua, Party list page > Game UI)
     hide_game_alliance = false, -- the game's alliance lists hidden
     hide_game_target   = false, -- the game's target frame hidden, and with it the game's target arrow
     locked        = true,
@@ -820,7 +820,7 @@ local function begin_panel(win_id, px, py, panel_col, accent)
         v_p1[1], v_p1[2] = wx, wy
         v_p2[1], v_p2[2] = wx + ww, wy + wh
 
-        -- Look tab > Panels: tinted (by kind) / dark / clear / framed, times opacity.
+        -- Look page > Panels: tinted (by kind) / dark / clear / framed, times opacity.
         -- Clear keeps a faint neutral plate so the text stays readable.
         local ps = theme.panel_style
         if ps == 'dark' then panel_col = C.PANEL_BG

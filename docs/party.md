@@ -6,15 +6,18 @@ Party + two alliance lists. Was goomUI 1.6.0 (based on XivParty).
 
 ## Setup
 
-`/goomui setup` (or Party tab > *Party setup*) shows a drag box per list and the options window: hide solo /
-alliance / in cutscenes, distance, buffs, filters, crew hover, update rate, bar width, text and buff size, cast
-range, per-list scale, font. `/goomui setup` again, or *Save + close*, saves.
+Options live on the settings window's *Party list* page (`/goomui`): hide solo / alliance / in cutscenes, distance,
+buffs, filters, crew hover, update rate, bar width, text and buff size, cast range, per-list scale, font. Each change
+saves right away. Hover (?) for what an option does.
+
+`/goomui setup` (or *Move lists* on that page) shows a drag box per list and opens the page. `/goomui setup` again,
+*Done: save positions*, or closing the settings window saves the positions.
 
 - **Move lists together** (default): dragging one moves all three. *Snap alliances above party* re-places them
   (stacked, or side by side with *Snap stacks alliances vertically* off).
 - Lists are kept fully on screen.
 
-**Game UI** (Party tab, per character): hide the game's own party list, alliance lists and target frame. Hiding the
+**Game UI** (Party list page, per character): hide the game's own party list, alliance lists and target frame. Hiding the
 target frame also hides the game's target arrow, so goomui's cursor is not doubled. Same method as Ashita's
 *hideparty* addon (atom0s); unload hideparty if you use these.
 

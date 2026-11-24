@@ -14,7 +14,7 @@ look and saved per character.
 | **Treasure pool** | a one-line summary by the party list (click for the window): items, time left, each member's lot (high to low, leader gold), passes, who still has to act |
 | **Rings** | ground rings under target / sub-target with facing arrow and range fill; a target cursor over the head in your palette colours; GEO bubble rings for your group |
 | **AAEV** | auto-attack chart as one line under the chat log (or under the target bar): per-round bars, last round, accuracy, crit, multi-attack (DA/TA/QA) |
-| **Look** | one bar style for everything; 30 colour presets; bar shape, texture and frame combine freely; panel styles (Look tab) |
+| **Look** | one bar style for everything; 30 colour presets; bar shape, texture and frame combine freely; panel styles (Look page) |
 
 ## Screenshots
 
@@ -40,7 +40,7 @@ In game (player names pixelated). Click one for full size; each section's page h
 <td colspan="2"><b>Bar looks</b> (<a href="docs/settings.md">Settings</a>)<br><img src="docs/styles.png" alt="Texture by shape, and Soft with a frame"><br><img src="docs/panels.png" alt="Panel styles: Tinted, Dark, Clear, Framed"></td>
 </tr>
 <tr>
-<td colspan="2"><b>Look tab</b><br><img src="docs/look_tab.png" alt="The Look tab: colour presets, bar look, panels" width="420"></td>
+<td colspan="2"><b>Look page</b><br><img src="docs/look_tab.png" alt="The Look page: colour presets, bar look, panels" width="420"></td>
 </tr>
 </table>
 
@@ -57,11 +57,11 @@ are used as they are
 
 ## First steps
 
-1. `/goomui` opens the settings window (tabs: Look, Party, Bar, Ring, Cursor, GEO, AAEV). Pick a colour preset in Look;
-   *Apply to all characters* sends it to your other characters (MultiSend).
-2. **Party:** *Party setup* (or `/goomui setup`) shows drag boxes for the three lists and the list options;
-   `/goomui setup` again saves.
-3. **Target bar:** Bar tab, uncheck *Lock position*, drag, check it again. The AAEV chart follows it.
+1. `/goomui` opens the settings window (pages on the left: Look, Party list, Target bar, Rings, Cursor, GEO, AAEV). Pick a colour preset in Look;
+   *Apply look to all characters* sends it to your other characters (MultiSend). Hover (?) for what an option does.
+2. **Party:** Party list page holds the list options. *Move lists* (or `/goomui setup`) shows drag boxes for the three
+   lists; `/goomui setup` again or *Done: save positions* saves.
+3. **Target bar:** Target bar page, uncheck *Lock position*, drag, check it again. The AAEV chart follows it.
 4. **AAEV** is off until `/goomui aaev on`; `/goomui aaev demo` shows sample data.
 
 ## Commands you'll use most
@@ -75,7 +75,7 @@ are used as they are
 | `/goomui aaev demo` | chart with sample data |
 | `/goomui look next\|prev\|<preset>` | try colour presets in game |
 | `/goomui ring on\|off` | target rings |
-| `/goomui cursor on\|off` | target cursor (styles, colours: Cursor tab) |
+| `/goomui cursor on\|off` | target cursor (styles, colours: Cursor page) |
 | `/goomui geo on\|off` | GEO bubble rings |
 
 [All commands](docs/commands.md).
@@ -119,8 +119,8 @@ docs/                 these pages
 | `Rings skipped a frame` line | rings stay on (a draw that errors skips that frame); report the line. Rings turn off only if 3 frames in a row fail |
 | Two party lists | another party list addon still loaded: unload it |
 | Party list gone | `/goomui setup` to see the boxes; hidden while solo if *Hide solo* is on |
-| Bar and chart overlap other UI | move the bar (Bar tab); the chart moves with it |
-| AAEV stat text tiny | widen the bar, or turn off cells (AAEV tab > Stats) |
+| Bar and chart overlap other UI | move the bar (Target bar page); the chart moves with it |
+| AAEV stat text tiny | widen the bar, or turn off cells (AAEV > Stats) |
 | Rings vanish with depth test on | `/goomui ring depth` off (no depth surface) |
 | Cast bar shows something that did not happen | note the item / spell and what you were doing, and report it |
 

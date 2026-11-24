@@ -3,18 +3,18 @@
 [← Back to the README](../README.md)
 
 Panels stack upward from the bar position: target at the bottom, then the mob's debuffs, pet, sub-target (with its own
-debuff row above it), cast, job ability and menu recast above it. The AAEV chart can dock under the target panel (AAEV tab > Layout; default is under the chat log).
+debuff row above it), cast, job ability and menu recast above it. The AAEV chart can dock under the target panel (AAEV > Layout; default is under the chat log).
 
-Bar tab > *Debuffs below the HP bar* puts each mob's debuff row under its target panel instead (everything else
+Target bar page > Mob debuffs > *Below the HP bar* puts each mob's debuff row under its target panel instead (everything else
 still stacks upward). A docked AAEV chart then sits under the main target's row.
 
-Bar tab > *Extra panels stack*: **Auto** (default) stacks them upward, or downward when they would not all fit above the
+Target bar page > *Extra panels stack*: **Auto** (default) stacks them upward, or downward when they would not all fit above the
 bar (a bar near the top of the screen). **Down** always puts them under the target panel: its debuff row, a docked AAEV
 chart, then pet, sub-target (debuffs under it), cast, job ability and menu recast. **Up** is the old behaviour.
 *Single bar* shows the target panel only (no pet, sub-target, cast, JA or menu panel).
 
-- **Move:** Bar tab, uncheck *Lock position*, drag the handle, check it again. Or type X / Y.
-- **Size:** Bar tab, Width / Height.
+- **Move:** Target bar page, uncheck *Lock position*, drag the handle, check it again. Or type X / Y.
+- **Size:** Target bar page, Width / Height.
 - **Shows:** distance (coloured by range, hitboxes counted when *Range colors account for hitbox size* is on),
   height offset (optional), HP %, name coloured by relation / claim.
 - **Menu recast:** hovering a spell, ability or mount in the game menus shows its cost and recast. An ability's bar
@@ -52,7 +52,7 @@ Kind comes from the entity spawn flags (`0x01` player, `0x02` NPC, `0x10` monste
 Own panel right above a monster's target panel, growing upward (the other panels sit above it): each debuff tracked
 on it, icon and seconds left (`m` / `h` past a minute), in the order they landed (a refresh keeps its place). Hover an icon: its name, time left (m:ss) and the mob, above the cursor. While sub-targeting, the
 sub-target's debuffs get their own row above its panel. Each row takes its panel's tint and stripe, with a
-gap above it, so a mob's row and panel read as one block. Bar tab:
+gap above it, so a mob's row and panel read as one block. Target bar page:
 *Show debuffs on the targeted mob*, *Debuff icon size*.
 
 ![Debuff panel above a monster's target panel](target_debuffs.png)
@@ -70,13 +70,13 @@ gap above it, so a mob's row and panel read as one block. Bar tab:
 
 ## Treasure pool
 
-Shown while the pool has items (Bar tab: *Show treasure pool window*; `/goomui pool demo` for sample items).
+Shown while the pool has items (Target bar page: *Treasure pool window*; `/goomui pool demo` for sample items).
 
 - **Summary** (default): one line between the party list and alliance 1, `Pool  8 items  3 to lot  4:31 left  [+]`
   (items, how many you have not acted on, soonest time left, `[+]` / `[-]` = window hidden / shown), framed for a few
   seconds when something drops. It sits in the gap under
   the alliance's last member (full or low-fi lists); with a full alliance (no gap), above the alliance lists. Click it to show or
-  hide the window. Off (Bar tab, or `/goomui pool dock`): the window alone, as before.
+  hide the window. Off (Target bar page, or `/goomui pool dock`): the window alone, as before.
 - **Window:** drag it anywhere off the buttons; the spot is saved. Per item: name, time left, then each member's lot
   high to low (current leader gold, yours green), `pass:` names, and `waiting N` for members in your zone who have
   not acted (names on hover; trusts are not counted, they never lot).
@@ -97,7 +97,7 @@ A spell or item you send (0x01A / 0x037) is only *pending*. It becomes a bar whe
 
 - Driven by the game's cast bar when it moves; otherwise timed from the spell / item cast time.
 - **Finished:** when the server sends the finish (0x028 category 4 magic / 5 item, `cmd_arg` = spell / item id) the
-  bar fills, reads `done` in green and stays *Hold finished cast / JA* seconds (Bar tab, default 2.5 s). A cast too
+  bar fills, reads `done` in green and stays *Hold finished cast / JA* seconds (Target bar page, default 2.5 s). A cast too
   fast to get a bar still shows, as done.
 - **Interrupted** (`sp..`, same kind only): the bar stops where it was, turns red, reads `interrupted`, and stays
   the same time.
