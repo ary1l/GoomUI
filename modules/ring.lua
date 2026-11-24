@@ -2404,7 +2404,7 @@ end
 
 local function ddebug_collect(index)
     local d = ddebug;
-    d.pass = 'fill';
+    d.pass, d.draws = 'fill', { };
     local s = tr.saved.rs; -- RS_SAVE order: 4 ZENABLE, 5 ZFUNC, 6 ZWRITEENABLE
     d.lines[#d.lines + 1] = ('game Z: enable %s func %s write %s | ours: enable %s'):fmt(tostring(s[4]), tostring(s[5]),
         tostring(s[6]), cfg.depth and '1' or '0');
@@ -2498,11 +2498,12 @@ function M.render()
     tr.count = 0;
     tr.pulse = ring_pulse();
     begin_state();
-    if (ddebug ~= nil) then pcall(ddebug_collect, index); end
+    local dbg = (ddebug ~= nil and cfg.depth) and ddebug or nil; -- armed: reports the first frame with depth on
+    if (dbg ~= nil) then pcall(ddebug_collect, index); end
     local ok, err = xpcall(draw_frame, debug.traceback, has_geo, has_target, has_cursor, index, index_sub, first, pick);
     tr.count = 0; -- a batch cut short by an error is dropped
     end_state();  -- always: the device states go back even when a draw errors
-    if (ddebug ~= nil) then ddebug_print(ok, err); end
+    if (dbg ~= nil) then ddebug_print(ok, err); end
     if (ok) then
         frame.fails = 0;
         return;
@@ -2611,7 +2612,7 @@ function M.command(args)
 
     if (sub == 'ddebug') then
         ddebug = { lines = { }, draws = { }, pass = 'fill' };
-        print(chat.header(addon.name):append(chat.message('ddebug: printing the next frame that draws rings or the cursor (have a target).')));
+        print(chat.header(addon.name):append(chat.message('ddebug armed: target something, then turn Depth test on. The first frame drawn with it on is printed.')));
         return;
     end
 

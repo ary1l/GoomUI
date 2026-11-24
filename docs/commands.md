@@ -45,7 +45,7 @@
 |---|---|
 | `/goomui ring` | ring status |
 | `/goomui ring on\|off\|depth\|arrow\|runes\|fade\|flip` | toggles |
-| `/goomui ring ddebug` | depth facts for one frame (depth surface, render target, game Z states, draw results), for the depth test |
+| `/goomui ring ddebug` | arm, then turn Depth test on: prints that first frame's depth facts (depth surface, render target, game Z states, draw results, frame error) |
 | `/goomui ring scale <n>` \| `slices <n>` | size / smoothness |
 | `/goomui ring range on\|off\|geo\|hitbox` | range fill toggles |
 | `/goomui ring range base <n>` \| `fill <n>` | range in yalms / fill strength |
