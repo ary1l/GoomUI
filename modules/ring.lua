@@ -150,7 +150,6 @@ local GLYPH = {
 
 local default_settings = T{
     enabled = true,
-    depth   = false,    -- Z-test the ring against the world; see /tring depth
     arrow   = true,
     runes   = true,
     fade    = true,
@@ -656,9 +655,9 @@ local function begin_state()
     dev:SetRenderState(C.D3DRS_ALPHABLENDENABLE, 1);
     dev:SetRenderState(C.D3DRS_SRCBLEND, C.D3DBLEND_SRCALPHA);
     dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_ONE);
-    -- Depth is opt-in: if Ashita's present-time render target has no depth
-    -- surface bound, a Z-enabled draw fails outright and nothing appears.
-    dev:SetRenderState(C.D3DRS_ZENABLE, cfg.depth and 1 or 0);
+    -- No depth test: at present time the bound depth buffer (same size as the back buffer, D24S8 under dgVoodoo)
+    -- does not hold the world's depth, so a Z-tested ring draws (S_OK) but no pixel passes. Measured in game.
+    dev:SetRenderState(C.D3DRS_ZENABLE, 0);
     dev:SetRenderState(C.D3DRS_ZFUNC, C.D3DCMP_LESSEQUAL);
     dev:SetRenderState(C.D3DRS_ZWRITEENABLE, 0);
     dev:SetRenderState(C.D3DRS_ALPHATESTENABLE, 0);
@@ -2463,9 +2462,8 @@ function M.render()
 end
 
 local function status_line()
-    return ('goomui ring: %s | depth %s | scale %.2f | slices %d | arrow %s | runes %s | fade %s | flip %s | geo %s | range %s'):fmt(
+    return ('goomui ring: %s | scale %.2f | slices %d | arrow %s | runes %s | fade %s | flip %s | geo %s | range %s'):fmt(
         cfg.enabled and 'on' or 'off',
-        cfg.depth and 'on' or 'off',
         cfg.scale,
         cfg.slices,
         cfg.arrow and 'on' or 'off',
@@ -2626,8 +2624,6 @@ function M.command(args)
         cfg.enabled = true;
     elseif (sub == 'off') then
         cfg.enabled = false;
-    elseif (sub == 'depth') then
-        cfg.depth = not cfg.depth;
     elseif (sub == 'arrow') then
         cfg.arrow = not cfg.arrow;
     elseif (sub == 'runes') then

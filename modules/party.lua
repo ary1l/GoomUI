@@ -35,6 +35,7 @@ local settings = require('settings');
 local scaling  = require('scaling');
 local socket   = require('socket');
 local theme    = require('modules/theme');
+local W        = require('modules/widgets'); -- settings window helpers (sections, tips)
 local ui       = require('modules/ui');
 local crumb    = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
 
@@ -770,7 +771,7 @@ local tbar_m = 1;
 local function tbar_rect(x, y, w, h, c) rect(x, y, w, h, fade(c, tbar_m)); end
 local function tbar(x, y, w, h, frac, col, m)
     tbar_m = m;
-    theme.draw(tbar_rect, theme.A, floor(x), floor(y), floor(w + 0.5), floor(h + 0.5), frac, col); -- Look tab style
+    theme.draw(tbar_rect, theme.A, floor(x), floor(y), floor(w + 0.5), floor(h + 0.5), frac, col); -- Look page style
 end
 
 local function icon(e, x, y, size, c)
@@ -1632,13 +1633,18 @@ local function filtersToString()
     return table.concat(ids, ',');
 end
 
+-- Text fields on the Party list page start from the saved values.
+local function syncBufs()
+    filterBuf[1] = filtersToString();
+    fontBuf[1] = S.font;
+end
+
 local function setSetup(on)
     setup = on;
+    if (M.on_setup ~= nil) then M.on_setup(on); end
     if (on) then
         makeFakes();
         dragInit = {};
-        filterBuf[1] = filtersToString();
-        fontBuf[1] = S.font;
         crew.data['member2'] = { name = 'Member2', mj = 2, sj = 8, t = ashita.time.get_tick64() / 1000, list = {
             { k = 'A', n = 'Focus', s = 23 }, { k = 'A', n = 'Hundred Fists', s = 3540 }, { k = 'S', n = 'Cure IV', s = 4.5 } } };
         print(chat.header(addon.name):append(chat.message('Party setup on. Drag boxes, hover Member2 for recast preview. /goomui setup again = save.')));
@@ -1651,9 +1657,37 @@ local function setSetup(on)
     end
 end
 
+-- Options (drawn on the settings window's Party list page): every change saves this character's settings.lua.
 local function check(label, key, after)
-    local v = { S[key] };
-    if (imgui.Checkbox(label, v)) then S[key] = v[1]; if (after) then after(); end end
+    local v = { S[key] == true };
+    if (imgui.Checkbox(label, v)) then
+        S[key] = v[1];
+        if (after) then after(); end
+        settings.save();
+    end
+end
+
+-- Save once on release where the binding has IsItemDeactivatedAfterEdit, else on every change.
+local function released(changed)
+    if (imgui.IsItemDeactivatedAfterEdit ~= nil) then return imgui.IsItemDeactivatedAfterEdit(); end
+    return changed;
+end
+
+local function sliderI(label, t, key, lo, hi)
+    local v = { t[key] };
+    local changed = imgui.SliderInt(label, v, lo, hi);
+    if (changed) then t[key] = math.max(lo, math.min(hi, v[1])); end
+    if (released(changed)) then settings.save(); end
+end
+
+local function sliderF(label, t, key, lo, hi, after, fmt)
+    local v = { t[key] };
+    local changed = imgui.SliderFloat(label, v, lo, hi, fmt or '%.2f');
+    if (changed) then
+        t[key] = math.max(lo, math.min(hi, v[1]));
+        if (after) then after(); end
+    end
+    if (released(changed)) then settings.save(); end
 end
 
 local function drawSetup()
@@ -1688,60 +1722,6 @@ local function drawSetup()
             imgui.PopStyleColor(1);
         end
     end
-
-    local open = { true };
-    if (imgui.Begin('goomui config', open, ImGuiWindowFlags_AlwaysAutoResize)) then
-        check('Low-fi (this char): text only (no bars), 250ms poll', 'lowfi', snapLists);
-        check('Move lists together', 'group');
-        imgui.SameLine();
-        if (imgui.Button('Snap alliances above party')) then snapLists(); end
-        check('Snap stacks alliances vertically', 'allyStack', snapLists);
-        check('Hide solo', 'hideSolo');
-        check('Hide alliance', 'hideAlliance');
-        check('Hide in cutscene/map', 'hideCutscene');
-        check('Show distance', 'showDist');
-        check('Job colours (GoomSwap palette)', 'jobColors');
-        check('Leader star', 'leaderStar');
-        check('Show buffs', 'showBuffs');
-        check('Debuffs on own line (tinted red)', 'debuffLine');
-        check('Buffs on right side', 'buffRight');
-        check('Filter = whitelist', 'whitelist', rederiveAll);
-        if (imgui.InputText('Filter IDs (comma)', filterBuf, 512)) then
-            S.filters = T{ };
-            for id in filterBuf[1]:gmatch('%d+') do S.filters[tonumber(id)] = true; end
-            rederiveAll();
-        end
-        check('Crew: share my recasts', 'crewShare');
-        check('Crew: show recasts on hover', 'crewHover');
-        check('Low-fi: allow hover (opt-in)', 'lofiHover');
-        local v = { S.updateMs };
-        if (imgui.SliderInt('Update ms', v, 16, 250)) then S.updateMs = v[1]; end
-        v = { S.lofiMs };
-        if (imgui.SliderInt('Low-fi update ms', v, 100, 1000)) then S.lofiMs = v[1]; end
-        v = { S.barW };
-        if (imgui.SliderInt('Bar width', v, 80, 320)) then S.barW = v[1]; end
-        v = { S.textScale };
-        if (imgui.SliderFloat('Text size', v, 0.6, 1.6, '%.2f')) then S.textScale = v[1]; applyFont(); end
-        v = { S.buffSize };
-        if (imgui.SliderInt('Buff size', v, 10, 32)) then S.buffSize = v[1]; end
-        v = { S.buffsPerRow };
-        if (imgui.SliderInt('Buffs per line', v, 4, 32)) then S.buffsPerRow = v[1]; end
-        v = { S.buffGap or 6 };
-        if (imgui.SliderInt('Buff spacing', v, 0, 60)) then S.buffGap = v[1]; end
-        v = { S.castRange };
-        if (imgui.SliderFloat('Cast range', v, 5, 30, '%.1f')) then S.castRange = v[1]; end
-        for li = 0, 2 do
-            local L = S[listKeys[li]];
-            v = { L.scale };
-            if (imgui.SliderFloat(listKeys[li] .. ' scale', v, 0.5, 2.5, '%.2f')) then L.scale = v[1]; end
-        end
-        if (imgui.InputText('Font', fontBuf, 64)) then
-            if (fontBuf[1] ~= '' and gdi ~= nil and gdi:get_font_available(fontBuf[1])) then S.font = fontBuf[1]; applyFont(); end
-        end
-        if (imgui.Button('Save + close')) then open[1] = false; end
-    end
-    imgui.End();
-    if (not open[1]) then setSetup(false); end
 end
 
 -------------------------------------------------------------------------------
@@ -1750,12 +1730,14 @@ end
 settings.register('settings', 'goomui_settings_update', function (s)
     if (s ~= nil) then S = s; end
     ensurePositions();
+    syncBufs();
     applyFont();
     rederiveAll();
 end);
 
 ashita.events.register('load', 'goomui_load', function ()
     ensurePositions();
+    syncBufs();
 end);
 
 ashita.events.register('unload', 'goomui_unload', function ()
@@ -1821,6 +1803,77 @@ end
 
 function M.toggle_setup() setSetup(not setup); end
 function M.in_setup() return setup; end
+
+-- The settings window's Party list page.
+function M.draw_options()
+    W.section('Position', '/goomui setup does the same as Move lists.');
+    if (imgui.Button(setup and 'Done: save positions##pl_setup' or 'Move lists##pl_setup')) then setSetup(not setup); end
+    W.tip('Drag boxes for party / alliance 1 / alliance 2. Hover Member2 for a recast preview.');
+    imgui.SameLine();
+    if (imgui.Button('Snap alliances above party##pl_snap')) then snapLists(); settings.save(); end
+    check('Move lists together', 'group');
+    W.tip('Dragging one list moves all three.');
+    check('Snap stacks alliances vertically', 'allyStack', snapLists);
+    W.tip('Off: alliance 2 sits left of alliance 1.');
+
+    W.section('Size', 'On top of the Look page UI scale.');
+    sliderF('Party scale##pl_s0', S.party, 'scale', 0.5, 2.5);
+    sliderF('Alliance 1 scale##pl_s1', S.alliance1, 'scale', 0.5, 2.5);
+    sliderF('Alliance 2 scale##pl_s2', S.alliance2, 'scale', 0.5, 2.5);
+    sliderI('Bar width##pl_barw', S, 'barW', 80, 320);
+    sliderF('Text size##pl_text', S, 'textScale', 0.6, 1.6, applyFont);
+    local changed = imgui.InputText('Font##pl_font', fontBuf, 64);
+    if (changed and fontBuf[1] ~= '' and gdi ~= nil and gdi:get_font_available(fontBuf[1])) then
+        S.font = fontBuf[1];
+        applyFont();
+    end
+    if (released(changed)) then settings.save(); end
+    W.tip('Font family name. Applied once the name matches an installed font.');
+
+    W.section('Show');
+    check('Hide solo', 'hideSolo');
+    check('Hide alliance', 'hideAlliance');
+    check('Hide in cutscene / map', 'hideCutscene');
+    check('Distance', 'showDist');
+    sliderF('Cast range##pl_range', S, 'castRange', 5, 30, nil, '%.1f');
+    W.tip(("Distance is green up to this, yellow to %d', grey beyond. With Distance on, members past it dim. "
+        .. "Most spells: 21.8' (varies with target size)."):fmt(S.targetRange));
+    check('Job colours', 'jobColors');
+    W.tip('Main / sub job text in the GoomSwap job colours.');
+    check('Leader star', 'leaderStar');
+
+    W.section('Buffs');
+    check('Show buffs', 'showBuffs');
+    check('Debuffs on their own line (tinted red)', 'debuffLine');
+    check('Buffs on the right side', 'buffRight');
+    sliderI('Icon size##pl_bsz', S, 'buffSize', 10, 32);
+    sliderI('Icons per line##pl_bpr', S, 'buffsPerRow', 4, 32);
+    if (S.buffGap == nil) then S.buffGap = 6; end
+    sliderI('Gap to the list##pl_bgap', S, 'buffGap', 0, 60);
+    W.tip('Raise it if big text overlaps the icons.');
+    changed = imgui.InputText('Filter IDs##pl_filter', filterBuf, 512);
+    if (changed) then
+        S.filters = T{ };
+        for id in filterBuf[1]:gmatch('%d+') do S.filters[tonumber(id)] = true; end
+        rederiveAll();
+    end
+    if (released(changed)) then settings.save(); end
+    W.tip('Buff IDs, comma separated. These are hidden; with Whitelist on, only these are shown.');
+    check('Whitelist', 'whitelist', rederiveAll);
+
+    W.section('Crew', 'Other goomui boxes on this PC (localhost UDP). /goomui crew = link status.');
+    check('Share my recasts', 'crewShare');
+    check('Show their recasts on hover', 'crewHover');
+
+    W.section('Performance');
+    local lf = { S.lowfi == true };
+    if (imgui.Checkbox('Low-fi##pl_lowfi', lf)) then M.set_lowfi(lf[1]); end
+    W.tip('This character: text only (no bars), slower poll, no distance, no hover / receive (still sends crew data).');
+    check('Low-fi: allow hover', 'lofiHover');
+    W.tip('Opt-in: needs the receive socket.');
+    sliderI('Update ms##pl_ums', S, 'updateMs', 16, 250);
+    sliderI('Low-fi update ms##pl_lms', S, 'lofiMs', 100, 1000);
+end
 
 -- Where a widget can sit between the party list and the alliance lists above it (the treasure pool summary), in
 -- screen pixels: the party list's right edge and top; the bottom of the lowest alliance member row above it and the

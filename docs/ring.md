@@ -4,19 +4,19 @@
 
 ## Target rings
 
-Rings on the ground under your target and sub-target: facing arrow, runes, rear fade (Ring tab or
+Rings on the ground under your target and sub-target: facing arrow, runes, rear fade (Rings page or
 `/goomui ring ...`).
 
 - **Range fill:** the ring fills when the target is within *Base range* (center to center). *Add both hitboxes*
   adds your hitbox and the target's.
-- **Depth test:** off by default. On, rings hide behind terrain; if they vanish entirely, Ashita's render target has
-  no depth surface: turn it off.
+- Rings draw over terrain: there is no depth test (the depth buffer goomui sees at that point in the frame does not
+  hold the world's depth).
 - Hidden when the game interface is hidden, in cutscenes, and while the map or expanded log menus are open.
 
 ## Target cursor
 
-A marker over your target's head, drawn over everything (Cursor tab or `/goomui cursor ...`). It does what the
-customtarget addon does: unload that one. The game's own target arrow still shows above it: Party tab > *Game UI* >
+A marker over your target's head, drawn over everything (Cursor page or `/goomui cursor ...`). It does what the
+customtarget addon does: unload that one. The game's own target arrow still shows above it: Party list page > *Game UI* >
 *Hide the game's target frame and target arrow* hides it (the arrow goes with the game's target frame, as with
 Ashita's *hideparty* addon). Unload hideparty if you use this.
 
@@ -28,7 +28,7 @@ Ashita's *hideparty* addon). Unload hideparty if you use this.
   sub-target, your held target keeps a cursor in *Colour*, 10 px higher. Default TP ready.
 - **Float:** drifts up and down 2.5 px.
 - **Lift over players:** 12 px higher over players (0-40), clearing the master level stars on their nameplate.
-- **Apply to all characters:** sends the cursor settings to every character with `/mss` (MultiSend). The Look tab
+- **Apply to all characters:** sends the cursor settings to every character with `/mss` (MultiSend). The Look page
   has the same button for the colour preset, bar look and panels.
 - **Placement:** the head point the game puts the name at (skeleton bone 2, read as customtarget reads it); doors and
   other objects: 8 px above their position. Same hiding rules as the rings.

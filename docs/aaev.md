@@ -2,11 +2,11 @@
 
 [← Back to the README](../README.md)
 
-Off by default: `/goomui aaev on`. Settings: AAEV tab (Display, Layout, Stats, Weaponskills, Effects, Pet).
+Off by default: `/goomui aaev on`. Settings: /goomui, AAEV (pages Display, Layout, Stats, Weaponskills, Effects, Pet).
 
 ## Position
 
-AAEV tab > Layout, *Player chart position*:
+AAEV > Layout, *Position*:
 
 | Position | Where |
 |---|---|
@@ -16,7 +16,7 @@ AAEV tab > Layout, *Player chart position*:
 
 ![The strip under the chat log, in game](aaev_strip.png)
 
-Under chat log: goomui cannot read the chat log's position, so the strip is placed from settings (Layout tab):
+Under chat log: goomui cannot read the chat log's position, so the strip is placed from settings (AAEV > Layout):
 
 | Setting | Default |
 |---|---|
@@ -69,6 +69,6 @@ ACC 96% (97%)      CRIT 26%      MULTI 24/11/5%
 - **MULTI** (DA / TA / QA) reads the melee result `sub_kind` in 0x028 (0 main hand, 1 off hand, 2 / 3 kicks), per atom0s
   XiPackets `world/server/0x0028`. Off hand and kicks are not counted. Weapons that occasionally attack 2-4 times
   add main-hand swings too, so they show here.
-- Cells on / off: AAEV tab > Stats; MULTI: Layout (*DA / TA / QA columns*).
+- Cells on / off: AAEV > Stats; MULTI: Layout (*DA / TA / QA columns*).
 - A row too wide shrinks its text (down to *MinFontScale*); cells never overlap.
 - *Stat grid* off: the older label lines.

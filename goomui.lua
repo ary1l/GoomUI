@@ -15,7 +15,7 @@ local party    = require('modules/party');   -- registers its own draw / packet 
 local theme    = require('modules/theme');
 local mobdebuff = require('modules/mobdebuff');
 local pool     = require('modules/pool');
-local hidegame = require('modules/hidegame'); -- the game's own party / alliance / target frames (Party tab)
+local hidegame = require('modules/hidegame'); -- the game's own party / alliance / target frames (Party list page)
 local crumb    = require('modules/crumb');  -- crash marker: names the step a native crash happened in
 
 --[[
@@ -170,6 +170,7 @@ ashita.events.register('load', 'thud_load', function ()
     adopt_aaev(settings.load(aaev.defaults, 'aaev'));
     aaev.init();
     aaev.on_config = gui.open_window;
+    party.on_setup = function (on) if (on) then gui.show_page('party'); end end; -- setup options live on that page
     aaev.anchor_fn = bar.anchor;   -- docked AAEV chart follows the target bar
     aaev.dock_report = bar.set_dock_h; -- and the bar's downward stack starts under it
     gui.on_theme = function (name)
@@ -218,7 +219,7 @@ end);
 ashita.events.register('packet_in',  'thud_bar_in',   function (e) bar.packet_in(e);  end);
 ashita.events.register('packet_in',  'thud_ring_in',  function (e) ring.packet_in(e); end);
 ashita.events.register('packet_in',  'thud_aaev_in',  function (e) aaev.packet_in(e); end);
--- Mob debuffs: 0x028 / 0x029 only while the row is on (Bar tab); zone, merit and job point packets always.
+-- Mob debuffs: 0x028 / 0x029 only while the row is on (Target bar page); zone, merit and job point packets always.
 local debuffs_on = true;
 ashita.events.register('packet_in',  'thud_debuff_in', function (e)
     local on = (cfg.bar == nil) or (cfg.bar.show_debuffs ~= false);
@@ -317,7 +318,7 @@ local HELP = {
     '/goomui look panel tinted|dark|clear|framed | opacity <0.25-2>',
     '/goomui scale <0.5-3>           UI scale: text + sizes of every goomui window (small / high-DPI screens)',
     '/goomui ring                    ring status',
-    '/goomui ring on|off|depth|arrow|runes|fade|flip',
+    '/goomui ring on|off|arrow|runes|fade|flip',
     '/goomui ring scale <n> | slices <n>',
     '/goomui ring range on|off|geo|hitbox | base <n> | fill <n>',
     '/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | lift <px>',

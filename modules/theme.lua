@@ -24,7 +24,7 @@ local function argb(r, g, b, a) return (a or 255) * 0x1000000 + r * 0x10000 + g 
 T.f4, T.u32, T.argb = f4, u32, argb;
 
 -- Colour presets (rgb). Only bar / chart colours change; plates, tints, stripes
--- and text stay the same. Pick in the settings window (Look tab); saved per
+-- and text stay the same. Pick in the settings window (Look page); saved per
 -- character in bar.lua as `theme`.
 local PRESETS = {
     vivid = {   -- default: saturated, readable at a glance
@@ -439,7 +439,7 @@ local function frect(dl, x1, y1, x2, y2, col, r)
 end
 T.frect = frect;
 
--- Bar look = shape + texture + frame, any colour preset (Look tab; bar.lua keys
+-- Bar look = shape + texture + frame, any colour preset (Look page; bar.lua keys
 -- bar_style / bar_texture / bar_frame).
 --   shape    soft  rounded; light upper band, 1px top highlight, 1px dark bottom edge
 --            flat  square, plain fill

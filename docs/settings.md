@@ -2,7 +2,9 @@
 
 [← Back to the README](../README.md)
 
-Use the settings window (`/goomui`); changes save per character as you make them.
+Use the settings window (`/goomui`); changes save per character as you make them. Pages are listed on the left
+(AAEV's pages appear under it once AAEV is on); hover (?) for what an option does. The window is resizable and
+scrolls; its accent colour follows the colour preset.
 
 ## Files
 
@@ -29,7 +31,7 @@ Only keys that exist in goomui with the same type are copied. The old files are 
 
 ## Colour presets
 
-Look tab, one button each with a swatch strip:
+Look page, one button each with a swatch strip:
 
 | Preset | Feel |
 |---|---|
@@ -67,14 +69,14 @@ Look tab, one button each with a swatch strip:
 Try them in game without the window: `/goomui look next`, `/goomui look prev`, `/goomui look <preset>`.
 
 Applies at once to the target bar, cast / menu bars, party list and AAEV chart; saved per character in `bar.lua`
-as `theme`. Panel tints, stripes, plates and text do not change. AAEV can use its own colours instead: AAEV tab >
+as `theme`. Panel tints, stripes, plates and text do not change. AAEV can use its own colours instead: AAEV >
 Layout, *goomui colours* off (the `Color*` values in `aaev.lua`).
 
-![The Look tab in game: presets with their colours, bar look, panels](look_tab.png)
+![The Look page in game: presets with their colours, bar look, panels](look_tab.png)
 
 ## Bar look
 
-Look tab, *Bar look*: three independent choices, any colour preset. Saved in `bar.lua` as `bar_style`,
+Look page, *Bar look*: three independent choices, any colour preset. Saved in `bar.lua` as `bar_style`,
 `bar_texture`, `bar_frame`.
 
 ![Texture (rows) x shape (columns), and Soft with a frame](styles.png)
@@ -92,7 +94,7 @@ Outline → Flat + Frame.
 
 ## Panels
 
-Look tab, *Panels*: the plates behind the target, cast, JA and menu panels and the AAEV chart. Saved in `bar.lua` as
+Look page, *Panels*: the plates behind the target, cast, JA and menu panels and the AAEV chart. Saved in `bar.lua` as
 `panel_style` and `panel_alpha`.
 
 ![Tinted, Dark, Clear, Framed](panels.png)
@@ -109,7 +111,7 @@ Look tab, *Panels*: the plates behind the target, cast, JA and menu panels and t
 
 ### UI scale
 
-*Scale* (0.5 - 3, Look tab) multiplies the text and pixel sizes of every goomui window: target / cast / menu
+*Scale* (0.5 - 3, Look page) multiplies the text and pixel sizes of every goomui window: target / cast / menu
 panels, debuff icons, AAEV chart, treasure pool, party lists and the settings window. Settings stay in scale-1
 pixels. Party lists keep their own per-list scale on top of it. Applied when the slider is released; *1x* resets.
 Command: `/goomui scale <0.5-3>`. Other addons' text is not affected.

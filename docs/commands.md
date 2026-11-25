@@ -34,7 +34,7 @@
 
 | Command | Does |
 |---|---|
-| `/goomui pool` | treasure pool on / off (also Bar tab) |
+| `/goomui pool` | treasure pool on / off (also Target bar page) |
 | `/goomui pool open` | show / hide the window (same as clicking the summary) |
 | `/goomui pool dock` | summary by the party list on / off (off: the window alone) |
 | `/goomui pool demo` | sample items, to place it (drag the window; buttons send nothing in the demo) |
@@ -44,7 +44,7 @@
 | Command | Does |
 |---|---|
 | `/goomui ring` | ring status |
-| `/goomui ring on\|off\|depth\|arrow\|runes\|fade\|flip` | toggles |
+| `/goomui ring on\|off\|arrow\|runes\|fade\|flip` | toggles |
 | `/goomui ring scale <n>` \| `slices <n>` | size / smoothness |
 | `/goomui ring range on\|off\|geo\|hitbox` | range fill toggles |
 | `/goomui ring range base <n>` \| `fill <n>` | range in yalms / fill strength |
@@ -76,4 +76,4 @@
 | `/goomui aaev bars <n>` | bars kept |
 | `/goomui aaev delay <n>` \| `autohide` \| `always` | hiding after disengage |
 | `/goomui aaev zone` \| `zonereset` | zone accuracy / reset it |
-| `/goomui aaev config` \| `reload` \| `help` | settings tab / reload settings / help |
+| `/goomui aaev config` \| `reload` \| `help` | settings page / reload settings / help |

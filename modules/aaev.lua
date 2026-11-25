@@ -10,6 +10,7 @@ local chat  = require('chat');
 local slib  = require('settings');
 local data  = require('modules/aaev_data');
 local theme = require('modules/theme');
+local W     = require('modules/widgets'); -- settings window helpers (sections, tips)
 local parse_action = require('modules/action');
 local dupes = require('modules/dupes'); -- resent 0x028 (modules/dupes.lua)
 
@@ -911,7 +912,7 @@ local function refresh_cols()
     c = settings.BGColor;
     tc.bg = { c[1] / 255, c[2] / 255, c[3] / 255, settings.BGAlpha / 255 };
     if (settings.ThemeColors) then
-        -- Same plate as the target bar panels (Look tab > Panels: clear = none, opacity).
+        -- Same plate as the target bar panels (Look page > Panels: clear = none, opacity).
         local pa = (theme.panel_style == 'clear') and 0 or math.min(255, theme.PLATE[4] * theme.panel_alpha);
         tc.bg = theme.f4(theme.PLATE[1], theme.PLATE[2], theme.PLATE[3], pa);
     end
@@ -1791,7 +1792,7 @@ end
 local function cfg_check_pair(la, ka, lb, kb, col_w)
     cfg_check(la, ka);
     if (kb ~= nil) then
-        imgui.SameLine(col_w or 220, 0);
+        imgui.SameLine(imgui.GetFontSize() * 16, 0);
         return cfg_check(lb, kb);
     end
 end
@@ -1837,18 +1838,9 @@ local function cfg_float(label, key, lo, hi)
     return false;
 end
 
-local function cfg_note(text) imgui.TextDisabled(text); end
 
 -- '(?)' with a hover tooltip
-local function help_marker(text)
-    imgui.SameLine();
-    imgui.TextDisabled('(?)');
-    if (imgui.IsItemHovered()) then
-        imgui.BeginTooltip();
-        imgui.Text(text);
-        imgui.EndTooltip();
-    end
-end
+local help_marker = W.tip;
 
 local function apply_chart_pos()
     state.applied_pos[TYPE_PLAYER] = false;
@@ -1867,23 +1859,21 @@ local function tab_display()
     if (imgui.Checkbox('One bar per attack round', rmode)) then
         set_setting('BarMode', rmode[1] and 'round' or 'swing');
     end
-    help_marker('Off: one bar per swing. On: one bar per round, color = swing count.');
-
-    if (settings.BarMode == 'round' and settings.ThemeColors) then
-        cfg_note('  dark blue single / blue double / light blue triple / lavender quad / violet 5+');
-        cfg_note('  grey bar = round landed nothing. Gold cap = round had a crit.');
-    elseif (settings.BarMode == 'round') then
-        cfg_note('  blue single / cyan double / green triple / yellow quad / orange 5+');
-        cfg_note('  white or red bar = round landed nothing. Max and Avg are per round.');
-        cfg_check('  Cap rounds that crit with a thin bar', 'RoundCritCap');
+    help_marker('Off: one bar per swing. On: one bar per round, color = swing count.\n\n' .. (settings.ThemeColors
+        and 'dark blue single / blue double / light blue triple / lavender quad / violet 5+. '
+            .. 'Grey bar = round landed nothing. Gold cap = round had a crit.'
+        or 'blue single / cyan double / green triple / yellow quad / orange 5+. '
+            .. 'White or red bar = round landed nothing. Max and Avg are per round.'));
+    if (settings.BarMode == 'round' and not settings.ThemeColors) then
+        imgui.Indent();
+        cfg_check('Cap rounds that crit with a thin bar', 'RoundCritCap');
+        imgui.Unindent();
     end
 
-    imgui.Separator();
-
-    cfg_check('Always show (permanent chart, ignores disengage)', 'AlwaysShow');
-    if (settings.AlwaysShow) then
-        cfg_note('  Auto-hide ignored while Always show is on.');
-    else
+    W.section('Show and hide');
+    cfg_check('Always show', 'AlwaysShow');
+    help_marker('Permanent chart, ignores disengage. Auto-hide is ignored while this is on.');
+    if (not settings.AlwaysShow) then
         cfg_check('Auto-hide on disengage', 'AutoHide');
         cfg_float('Hide delay (sec)', 'HideDelay', 0.0, 20.0);
     end
@@ -1892,41 +1882,38 @@ local function tab_display()
     cfg_check('Fixed window size (no resize jumps)', 'FixedSize');
 end
 
+local POS_ITEMS = { { 'chat', 'Under chat log' }, { 'bar', 'Under target bar' }, { 'free', 'Free (drag)' } };
+local POS_TIPS = {
+    chat = 'One line in the gap under the chat log. -1 = auto (fits the default log). ACC/CRIT here are zone-wide. '
+        .. 'Cells that do not fit are dropped: MAX, TH, AVG, WS. Weaponskills show as one WS cell (last one). '
+        .. 'Pet chart is unchanged.',
+    bar = 'Flush under the target bar, same x and width. Move the bar to move both.',
+    free = 'Drag it while unlocked (Player chart below).',
+};
 local function tab_layout()
-    imgui.Text('Player chart position');
-    for _, p in ipairs({ { 'chat', 'Under chat log' }, { 'bar', 'Under target bar' }, { 'free', 'Free (drag)' } }) do
-        imgui.SameLine();
-        if (imgui.Button(((settings.Position == p[1]) and '> ' or '  ') .. p[2] .. '##aaev_pos_' .. p[1])) then
-            set_setting('Position', p[1]);
-        end
-    end
+    local pick = W.choice_row('Position', POS_ITEMS, settings.Position, 'aaev_pos',
+        imgui.CalcTextSize('Position') + imgui.GetFontSize());
+    if (POS_TIPS[settings.Position] ~= nil) then help_marker(POS_TIPS[settings.Position]); end
+    if (pick ~= nil) then set_setting('Position', pick); end
     if (settings.Position == 'chat') then
-        cfg_note('  One line in the gap under the chat log. -1 = auto (fits the default log).');
         cfg_int('X (-1 auto)##strip', 'StripX', -1, 8000);
-        imgui.SameLine();
         cfg_int('Width (-1 auto)##strip', 'StripW', -1, 8000);
         cfg_int('Height##strip', 'StripH', 8, 40);
-        imgui.SameLine();
         cfg_int('Gap to screen bottom##strip', 'StripBottom', 0, 400);
         cfg_int('Rounds shown##strip', 'StripRounds', 5, 100);
-        imgui.SameLine();
         cfg_int('Px per round##strip', 'StripBarPx', 2, 20);
-        cfg_note('  ACC/CRIT here are zone-wide. Cells that do not fit are dropped: MAX, TH, AVG, WS.');
-        cfg_note('  Weaponskills show as one WS cell (last one). Pet chart is unchanged.');
-    elseif (settings.Position == 'bar') then
-        cfg_note('  Flush under the target bar, same x and width. Move the bar to move both.');
     end
     cfg_check('goomui colours', 'ThemeColors');
     help_marker('Shared palette with the target bar and party list. Off: the Color* values in aaev.lua.');
     cfg_check('Stat grid (labeled cells under the bars)', 'StatGrid');
     if (settings.StatGrid) then
-        cfg_check('  DA / TA / QA columns', 'DisplayMulti');
+        imgui.Indent();
+        cfg_check('DA / TA / QA columns', 'DisplayMulti');
         help_marker('Share of rounds where the main hand swung 2 / 3 / 4+ times (0x028 sub_kind 0). '
             .. 'Weapons that occasionally attack 2-4 times count here too.');
+        imgui.Unindent();
     end
-    imgui.Separator();
-    imgui.Text('Player chart');
-    if (settings.Position ~= 'free') then cfg_note('  X / Y / Width below apply to the Free position.'); end
+    W.section('Player chart', (settings.Position ~= 'free') and 'X / Y / Width below apply to the Free position.' or nil);
     local unlocked = { state.unlocked };
     if (imgui.Checkbox('Unlock -- drag charts with the mouse', unlocked)) then
         state.unlocked = unlocked[1];
@@ -1943,10 +1930,8 @@ local function tab_layout()
         end
     end
     if (cfg_int('X##chartpos', 'ChartStartX', 0, 8000)) then apply_chart_pos(); end
-    imgui.SameLine();
     if (cfg_int('Y##chartpos', 'ChartStartY', 0, 8000)) then apply_chart_pos(); end
     cfg_int('Width', 'ChartWidth', 20, 2000);
-    imgui.SameLine();
     cfg_int('Height', 'ChartHeight', 4, 400);
     cfg_int((settings.BarMode == 'round') and 'Bars (rounds)' or 'Bars (swings)',
             'ChartBars', 1, 100);
@@ -1955,19 +1940,18 @@ local function tab_layout()
         if (font_scale_ok) then cfg_check('Shrink label text to fit the width', 'AutoFitLabels'); end
     end
 
-    imgui.Separator();
-    imgui.Text('Appearance');
+    W.section('Appearance');
     cfg_slider('Bar alpha',        'BarsAlpha', 0, 255);
     cfg_check('Draw background panel', 'BGDisplay');
     if (settings.BGDisplay) then
-        cfg_slider('  Background alpha', 'BGAlpha', 0, 255);
+        cfg_slider('Background alpha', 'BGAlpha', 0, 255);
     end
     if (font_scale_ok) then cfg_float('Font scale', 'FontScale', 0.5, 3.0); end
 end
 
 local function tab_stats()
-    -- two-column checkbox grid, ~220 px per column
-    imgui.Text('Which numbers to show');
+    -- two-column checkbox grid
+    imgui.TextDisabled('Which numbers to show');
     cfg_check_pair('Max damage',              'DisplayMax',
                    'Average damage',          'DisplayAvg',      220);
     cfg_check_pair('Last round damage',       'DisplayLast',
@@ -1976,13 +1960,14 @@ local function tab_stats()
                    'Crit rate',               'DisplayCritRate', 220);
     cfg_check_pair('Zone accuracy',           'DisplayZoneAcc',
                    'Treasure Hunter tier',    'DisplayTH',       220);
-    if (settings.DisplayLast) then
-        cfg_check('  Last: include swing count, e.g. "Last: 2547 (4)"', 'LastShowHits');
-    end
     help_marker('TH rides on Last; disabling Last hides it.');
+    if (settings.DisplayLast) then
+        imgui.Indent();
+        cfg_check('Last: include swing count, e.g. "Last: 2547 (4)"', 'LastShowHits');
+        imgui.Unindent();
+    end
 
-    imgui.Separator();
-    imgui.Text('Format');
+    W.section('Format');
     -- stored as GlyphLabels
     cfg_check('Short prefixes  ("M 999" instead of "Max: 999")', 'GlyphLabels');
     help_marker(
@@ -2008,28 +1993,24 @@ local function tab_effects()
         set_setting('AdditionalEffectSingleBar', single[1]);
         if (single[1]) then set_setting('AdditionalEffectStackBars', false); end
     end
+    help_marker('Additional effects: enspells, TH procs, aftermath damage, etc.');
     if (not settings.AdditionalEffectSingleBar) then
         cfg_check('Stack AE damage as a second bar', 'AdditionalEffectStackBars');
     end
-    cfg_note('Additional effects: enspells, TH procs, aftermath damage, etc.');
 end
 
 local function tab_pet()
     cfg_check('Show pet chart (BST / DRG / SMN / PUP)', 'PetChart');
     if (not settings.PetChart) then return; end
-    imgui.Separator();
     if (cfg_int('X##petpos', 'PetChartStartX', 0, 8000)) then apply_chart_pos(); end
-    imgui.SameLine();
     if (cfg_int('Y##petpos', 'PetChartStartY', 0, 8000)) then apply_chart_pos(); end
     cfg_int('Width##pet',  'PetChartWidth',  20, 2000);
-    imgui.SameLine();
     cfg_int('Height##pet', 'PetChartHeight', 4,  400);
     cfg_int('Bars##pet',   'PetChartBars', 1, 100);
     cfg_int('Weaponskill lines##pet', 'PetWeaponskillCount', 1, 20);
 end
 
 local function tab_footer()
-    imgui.Separator();
     if (imgui.Button('Demo data')) then demo(); end
     imgui.SameLine();
     if (imgui.Button('Reset zone accuracy')) then
@@ -2039,20 +2020,13 @@ local function tab_footer()
     if (imgui.Button('Reset all to defaults')) then
         M.reset_defaults();
     end
-    cfg_note('Changes save per character as you make them.');
 end
 
-local TABS = { { 'Display', tab_display }, { 'Layout', tab_layout }, { 'Stats', tab_stats },
-               { 'Weaponskills', tab_weaponskills }, { 'Effects', tab_effects }, { 'Pet', tab_pet } };
-function M.draw_config_body()
-    if (imgui.BeginTabBar('##aaev_tabs')) then
-        for _, t in ipairs(TABS) do
-            if (imgui.BeginTabItem(t[1])) then t[2](); imgui.EndTabItem(); end
-        end
-        imgui.EndTabBar();
-    end
-    tab_footer();
-end
+-- Settings window pages (gui.lua lists them under AAEV).
+local TABS = { tab_display, tab_layout, tab_stats, tab_weaponskills, tab_effects, tab_pet };
+M.CONFIG_PAGES = { 'Display', 'Layout', 'Stats', 'Weaponskills', 'Effects', 'Pet' };
+function M.draw_config_page(i) TABS[i](); end
+M.draw_config_footer = tab_footer;
 
 ----------------------------------------------------------------------------------------------------
 -- Commands
@@ -2063,7 +2037,7 @@ local function msg(s)
 end
 
 local function show_help()
-    msg('/goomui aaev <cmd>  (settings: /goomui, AAEV tab). Commands:');
+    msg('/goomui aaev <cmd>  (settings: /goomui, AAEV page). Commands:');
     msg('  (bare)  - toggle charts');
     msg('  on|off  - enable / disable AAEV');
     msg('  config  - open the settings window');
@@ -2123,7 +2097,7 @@ function M.command(args)
         demo();
     elseif (cmd == 'unlock') then
         state.unlocked = true;
-        msg((settings.Position ~= 'free') and 'Player chart follows its position (AAEV tab > Layout). Pet chart unlocked; /goomui aaev lock when done.' or 'Charts unlocked; drag to position, then /goomui aaev lock.');
+        msg((settings.Position ~= 'free') and 'Player chart follows its position (AAEV > Layout). Pet chart unlocked; /goomui aaev lock when done.' or 'Charts unlocked; drag to position, then /goomui aaev lock.');
     elseif (cmd == 'lock') then
         state.unlocked = false;
         local p = state['pos_' .. TYPE_PLAYER];
