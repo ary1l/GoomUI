@@ -214,8 +214,6 @@ local function page_ring(c, ring)
 
     W.section('Target ring');
     check(c, 'ring', 'Target rings', 'enabled', hook);
-    check(c, 'ring', 'Depth test', 'depth', hook);
-    W.tip('Hide the ring behind terrain.');
     check(c, 'ring', 'Facing arrow', 'arrow', hook);
     check(c, 'ring', 'Flip arrow heading', 'flip', hook);
     W.tip('Use if the arrow points the wrong way.');

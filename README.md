@@ -121,7 +121,6 @@ docs/                 these pages
 | Party list gone | `/goomui setup` to see the boxes; hidden while solo if *Hide solo* is on |
 | Bar and chart overlap other UI | move the bar (Target bar page); the chart moves with it |
 | AAEV stat text tiny | widen the bar, or turn off cells (AAEV > Stats) |
-| Rings vanish with depth test on | `/goomui ring depth` off (no depth surface) |
 | Cast bar shows something that did not happen | note the item / spell and what you were doing, and report it |
 
 ## Credits

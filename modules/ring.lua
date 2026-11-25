@@ -150,7 +150,6 @@ local GLYPH = {
 
 local default_settings = T{
     enabled = true,
-    depth   = false,    -- Z-test the ring against the world; see /tring depth
     arrow   = true,
     runes   = true,
     fade    = true,
@@ -406,16 +405,9 @@ end
 --------------------------------------------------------------------------------
 -- Batch
 ----------------------------------------------------------------------------------------------------
--- /goomui ring ddebug: one drawn frame's depth facts, printed after that frame (nil = off).
-local ddebug = nil;
-
 local function flush()
     if (tr.count >= 3) then
-        local hr = dev:DrawPrimitiveUP(C.D3DPT_TRIANGLELIST, tr.count / 3, tr.verts, STRIDE);
-        if (ddebug ~= nil) then
-            local _, zon = dev:GetRenderState(C.D3DRS_ZENABLE);
-            ddebug.draws[#ddebug.draws + 1] = ('%s z%s %s'):fmt(ddebug.pass, tostring(zon), bit.tohex(hr));
-        end
+        dev:DrawPrimitiveUP(C.D3DPT_TRIANGLELIST, tr.count / 3, tr.verts, STRIDE);
     end
     tr.count = 0;
 end
@@ -663,9 +655,9 @@ local function begin_state()
     dev:SetRenderState(C.D3DRS_ALPHABLENDENABLE, 1);
     dev:SetRenderState(C.D3DRS_SRCBLEND, C.D3DBLEND_SRCALPHA);
     dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_ONE);
-    -- Depth is opt-in: if Ashita's present-time render target has no depth
-    -- surface bound, a Z-enabled draw fails outright and nothing appears.
-    dev:SetRenderState(C.D3DRS_ZENABLE, cfg.depth and 1 or 0);
+    -- No depth test: at present time the bound depth buffer (same size as the back buffer, D24S8 under dgVoodoo)
+    -- does not hold the world's depth, so a Z-tested ring draws (S_OK) but no pixel passes. Measured in game.
+    dev:SetRenderState(C.D3DRS_ZENABLE, 0);
     dev:SetRenderState(C.D3DRS_ZFUNC, C.D3DCMP_LESSEQUAL);
     dev:SetRenderState(C.D3DRS_ZWRITEENABLE, 0);
     dev:SetRenderState(C.D3DRS_ALPHATESTENABLE, 0);
@@ -2345,7 +2337,6 @@ local function draw_frame(has_geo, has_target, has_cursor, index, index_sub, fir
     end
 
     flush();
-    if (ddebug ~= nil) then ddebug.pass = 'band'; end
 
     -- Bands stay additive so they glow on dark ground.
     dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_ONE);
@@ -2362,7 +2353,6 @@ local function draw_frame(has_geo, has_target, has_cursor, index, index_sub, fir
     flush();
 
     if (has_cursor) then -- over everything: normal blend, no depth test
-        if (ddebug ~= nil) then ddebug.pass = 'cursor'; end
         dev:SetRenderState(C.D3DRS_DESTBLEND, C.D3DBLEND_INVSRCALPHA);
         dev:SetRenderState(C.D3DRS_ZENABLE, 0);
         draw_cursor(index, pick and cfg.cursor_sub or cfg.cursor_color, 0);
@@ -2389,48 +2379,6 @@ local function note_skipped_frame(err, index)
     end
     print(chat.header(addon.name):append(chat.error(
         ('Rings skipped a frame (they stay on; please report this line): %s%s'):fmt(line, diag))));
-end
-
--- Depth facts at the point the rings draw: the bound depth surface vs the render target, the game's own Z states
--- (saved by begin_state), the viewport depth range and the depth value the target's feet project to.
-local function surf_desc(get)
-    local hr, sf = get(dev);
-    if (hr ~= C.S_OK or sf == nil) then return 'none (' .. bit.tohex(hr) .. ')'; end
-    local r2, d = sf:GetDesc();
-    local out = (r2 == C.S_OK and d ~= nil) and ('%dx%d fmt %d'):fmt(d.Width, d.Height, tonumber(d.Format)) or 'no desc';
-    sf:Release();
-    return out;
-end
-
-local function ddebug_collect(index)
-    local d = ddebug;
-    d.pass, d.draws = 'fill', { };
-    local s = tr.saved.rs; -- RS_SAVE order: 4 ZENABLE, 5 ZFUNC, 6 ZWRITEENABLE
-    d.lines[#d.lines + 1] = ('game Z: enable %s func %s write %s | ours: enable %s'):fmt(tostring(s[4]), tostring(s[5]),
-        tostring(s[6]), cfg.depth and '1' or '0');
-    d.lines[#d.lines + 1] = 'depth surface: ' .. surf_desc(function (v) return v:GetDepthStencilSurface(); end);
-    d.lines[#d.lines + 1] = 'render target: ' .. surf_desc(function (v) return v:GetRenderTarget(); end);
-    local r3, vp = dev:GetViewport();
-    if (r3 == C.S_OK and vp ~= nil) then
-        d.lines[#d.lines + 1] = ('viewport: %dx%d at %d,%d  z %.3f - %.3f'):fmt(vp.Width, vp.Height, vp.X, vp.Y, vp.MinZ, vp.MaxZ);
-    end
-    if (index ~= nil and index ~= 0) then
-        local x, h, z = tr.ent:GetLocalPositionX(index), tr.ent:GetLocalPositionZ(index), tr.ent:GetLocalPositionY(index);
-        local sx, sy, nz, rhw = project(x, h, z);
-        d.lines[#d.lines + 1] = (sx == nil) and 'target feet: off screen'
-            or ('target feet: screen %.0f,%.0f  z %.5f  rhw %.5f'):fmt(sx, sy, nz, rhw);
-    end
-end
-
-local function ddebug_print(ok, err)
-    local d = ddebug;
-    ddebug = nil;
-    for _, l in ipairs(d.lines) do print(chat.header(addon.name):append(chat.message('ddebug ' .. l))); end
-    print(chat.header(addon.name):append(chat.message('ddebug draws (pass, Z, HRESULT): '
-        .. ((#d.draws > 0) and table.concat(d.draws, ' | ') or 'none'))));
-    if (not ok) then
-        print(chat.header(addon.name):append(chat.message('ddebug frame error: ' .. (tostring(err):match('^[^\n]*') or '?'))));
-    end
 end
 
 function M.render()
@@ -2498,12 +2446,9 @@ function M.render()
     tr.count = 0;
     tr.pulse = ring_pulse();
     begin_state();
-    local dbg = (ddebug ~= nil and cfg.depth) and ddebug or nil; -- armed: reports the first frame with depth on
-    if (dbg ~= nil) then pcall(ddebug_collect, index); end
     local ok, err = xpcall(draw_frame, debug.traceback, has_geo, has_target, has_cursor, index, index_sub, first, pick);
     tr.count = 0; -- a batch cut short by an error is dropped
     end_state();  -- always: the device states go back even when a draw errors
-    if (dbg ~= nil) then ddebug_print(ok, err); end
     if (ok) then
         frame.fails = 0;
         return;
@@ -2517,9 +2462,8 @@ function M.render()
 end
 
 local function status_line()
-    return ('goomui ring: %s | depth %s | scale %.2f | slices %d | arrow %s | runes %s | fade %s | flip %s | geo %s | range %s'):fmt(
+    return ('goomui ring: %s | scale %.2f | slices %d | arrow %s | runes %s | fade %s | flip %s | geo %s | range %s'):fmt(
         cfg.enabled and 'on' or 'off',
-        cfg.depth and 'on' or 'off',
         cfg.scale,
         cfg.slices,
         cfg.arrow and 'on' or 'off',
@@ -2610,12 +2554,6 @@ end
 function M.command(args)
     local sub = (#args >= 2) and args[2]:lower() or 'status';
 
-    if (sub == 'ddebug') then
-        ddebug = { lines = { }, draws = { }, pass = 'fill' };
-        print(chat.header(addon.name):append(chat.message('ddebug armed: target something, then turn Depth test on. The first frame drawn with it on is printed.')));
-        return;
-    end
-
     if (sub == 'range') then
         local opt = (#args >= 3) and args[3]:lower() or 'status';
         local val = tonumber(args[4]);
@@ -2686,8 +2624,6 @@ function M.command(args)
         cfg.enabled = true;
     elseif (sub == 'off') then
         cfg.enabled = false;
-    elseif (sub == 'depth') then
-        cfg.depth = not cfg.depth;
     elseif (sub == 'arrow') then
         cfg.arrow = not cfg.arrow;
     elseif (sub == 'runes') then

@@ -318,7 +318,7 @@ local HELP = {
     '/goomui look panel tinted|dark|clear|framed | opacity <0.25-2>',
     '/goomui scale <0.5-3>           UI scale: text + sizes of every goomui window (small / high-DPI screens)',
     '/goomui ring                    ring status',
-    '/goomui ring on|off|depth|arrow|runes|fade|flip',
+    '/goomui ring on|off|arrow|runes|fade|flip',
     '/goomui ring scale <n> | slices <n>',
     '/goomui ring range on|off|geo|hitbox | base <n> | fill <n>',
     '/goomui cursor [on|off] | style|color|sub <x> | size <n> | float|spin [on|off] | lift <px>',

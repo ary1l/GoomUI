@@ -9,8 +9,8 @@ Rings on the ground under your target and sub-target: facing arrow, runes, rear 
 
 - **Range fill:** the ring fills when the target is within *Base range* (center to center). *Add both hitboxes*
   adds your hitbox and the target's.
-- **Depth test:** off by default. On, rings hide behind terrain; if they vanish entirely, Ashita's render target has
-  no depth surface: turn it off.
+- Rings draw over terrain: there is no depth test (the depth buffer goomui sees at that point in the frame does not
+  hold the world's depth).
 - Hidden when the game interface is hidden, in cutscenes, and while the map or expanded log menus are open.
 
 ## Target cursor
