@@ -310,6 +310,7 @@ local HELP = {
     '/goomui  (or /gui)              toggle settings window',
     '/goomui setup                   party list setup: drag lists, list options (again = save)',
     '/goomui lowfi | crew | perf     party: low-fi toggle / crew link status / 10 s timing',
+    '/goomui bt                      party: buff timer diagnostics (learned lengths, tracked gains)',
     '/goomui tdebug                  party: target-marker diagnostics',
     '/goomui tinfo                   target bar: what it reads for your current target (one it does not show)',
     '/goomui pool [demo|open|dock]   treasure pool on/off / sample items / full window / summary by the party',

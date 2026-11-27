@@ -23,6 +23,7 @@
       Distance squared ................ Ashita 'distance' addon; XIUI partylist
       <stpt> cursor / t / st .......... XIUI libs/target.lua; Ashita libs/ffxi/targets.lua
       icon override 623 -> 62 ......... XIUI libs/texturemanager.lua
+      buff timers (hover) ............. modules/bufftimers.lua (statustimers, XiPackets 0x0063 / 0x0076 / 0x0028)
       20.8' Cure range, 50' target .... FFXIclopedia "Distance"
 ]]--
 
@@ -38,6 +39,8 @@ local theme    = require('modules/theme');
 local W        = require('modules/widgets'); -- settings window helpers (sections, tips)
 local ui       = require('modules/ui');
 local crumb    = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
+local BT       = require('modules/bufftimers'); -- buff time left for the icon hover tips
+local dupes    = require('modules/dupes'); -- resent 0x028 (modules/dupes.lua)
 
 local M = { };
 
@@ -71,6 +74,7 @@ local defaults = T{
     leaderStar   = true,  -- star after party / alliance leader names
     crewShare    = true,  -- send own recasts to other goomui boxes (localhost UDP)
     crewHover    = true,  -- show crew recasts on hover
+    buffTips     = true,  -- buff icon hover: name (#id), time left (exact: self / crew; else estimated)
     lofiHover    = false, -- low-fi: hover is opt-in (needs rx socket)
     allyStack    = true,  -- snap: alliances stacked above party (false = side by side)
     crewPort     = 37810, -- uses crewPort .. crewPort+7
@@ -332,24 +336,29 @@ end
 -------------------------------------------------------------------------------
 local DEBUFF = require('modules/debuffs'); -- [id] = true
 local rawBuffs, shownBuffs = {}, {};
-local selfRaw, selfShown   = {}, { b = {}, d = {} };
+local selfRaw, selfShown   = {}, { b = {}, d = {}, bk = {}, dk = {} };
 
 -- filtered, game order (no sorting); out.b = buffs, out.d = debuffs. Runs only when a list changes.
+-- out.bk / out.dk: which copy of its id each icon is (1, 2.. : two Marches), for the hover tip's timer.
+local occ = {};
 local function derive(raw, out)
     local nb, nd, wl, f = 0, 0, S.whitelist, S.filters;
-    local ob, od = out.b, out.d;
+    local ob, od, obk, odk = out.b, out.d, out.bk, out.dk;
+    for k in pairs(occ) do occ[k] = nil; end
     for i = 1, #raw do
         local id = raw[i];
         if ((f[id] == true) == wl) then
-            if (DEBUFF[id]) then nd = nd + 1; od[nd] = id; else nb = nb + 1; ob[nb] = id; end
+            local k = (occ[id] or 0) + 1;
+            occ[id] = k;
+            if (DEBUFF[id]) then nd = nd + 1; od[nd], odk[nd] = id, k; else nb = nb + 1; ob[nb], obk[nb] = id, k; end
         end
     end
-    for i = #ob, nb + 1, -1 do ob[i] = nil; end
-    for i = #od, nd + 1, -1 do od[i] = nil; end
+    for i = #ob, nb + 1, -1 do ob[i], obk[i] = nil, nil; end
+    for i = #od, nd + 1, -1 do od[i], odk[i] = nil, nil; end
     return out;
 end
 
-local function newShown() return { b = {}, d = {} }; end
+local function newShown() return { b = {}, d = {}, bk = {}, dk = {} }; end
 
 local function rederiveAll()
     for sid, raw in pairs(rawBuffs) do shownBuffs[sid] = derive(raw, shownBuffs[sid] or newShown()); end
@@ -380,6 +389,7 @@ end
 local seenSid = {};
 local function readAllEntries(get, start)
     for k in pairs(seenSid) do seenSid[k] = nil; end
+    local now = ashita.time.get_tick64() / 1000;
     for i = 0, 4 do
         local base = start + i * 0x30;
         local sid  = u32(get, base);
@@ -389,10 +399,11 @@ local function readAllEntries(get, start)
             rawBuffs[sid] = raw;
             readEntry(get, base, raw);
             shownBuffs[sid] = derive(raw, shownBuffs[sid] or newShown());
+            BT.sync(sid, raw, now);
         end
     end
     for sid in pairs(rawBuffs) do
-        if (not seenSid[sid]) then rawBuffs[sid] = nil; shownBuffs[sid] = nil; end
+        if (not seenSid[sid]) then rawBuffs[sid] = nil; shownBuffs[sid] = nil; BT.drop(sid); end
     end
 end
 
@@ -420,12 +431,15 @@ local function updateSelfBuffs()
         changed = true;
     end
     if (changed) then derive(selfRaw, selfShown); end
+    local sid = mm:GetParty():GetMemberServerId(0);
+    if (changed or not BT.tracked(sid)) then BT.sync(sid, selfRaw, ashita.time.get_tick64() / 1000); end
 end
 
 -------------------------------------------------------------------------------
 -- crew recasts over localhost UDP (independent of crewcd; different ports)
 -------------------------------------------------------------------------------
 local crew = { tx = nil, rx = nil, port = nil, nextBind = 0, nextSend = 0, namesNext = 0, data = {}, abil = {}, spell = {}, buf = {},
+               sbi = {}, sbs = {}, -- own buffs: ids, seconds left (-1 = no timer)
                scanMap = {}, scanPos = 0, scanWant = false, scanDone = false };
 
 local function abilityName(id, x)
@@ -477,6 +491,9 @@ local function buildPayload()
     local player, rc, buf = mm:GetPlayer(), mm:GetRecast(), crew.buf;
     local n = 4;
     buf[1], buf[2], buf[3], buf[4] = 'GMU1', me, tostring(player:GetMainJob()), tostring(player:GetSubJob());
+    for i = 1, BT.readSelf(crew.sbi, crew.sbs) do -- buffs first: an older receiver's 160-item cap cuts recasts
+        n = n + 1; buf[n] = ('B%d=%d'):fmt(crew.sbi[i], crew.sbs[i]);
+    end
     for x = 0, 31 do
         local id, t = rc:GetAbilityTimerId(x), rc:GetAbilityTimer(x);
         if ((id ~= 0 or x == 0) and t > 0) then
@@ -496,10 +513,11 @@ local function cmpRecast(a, b)
     return a.s < b.s;
 end
 
--- Wire format 'GMU1' (goomui 2.x boxes only).
+-- Wire format 'GMU1' (goomui 2.x boxes only): GMU1, name, main job, sub job, then items:
+-- B<buff id>=<s left, -1 = no timer> (own buffs, slot order; older boxes skip them), A<ability>=<s>, S<spell>=<s>.
 -- Any local program can send to these ports, so everything is validated: size, item count,
--- name (letters, current party/alliance member only), job ids (integers 0-255), seconds (finite).
-local CREW_MAX_MSG, CREW_MAX_ITEMS = 8192, 160; -- Ashita's LuaSocket already caps a UDP receive at 8192
+-- name (letters, current party/alliance member only), job ids (integers 0-255), seconds (finite), buff ids 1-1023.
+local CREW_MAX_MSG, CREW_MAX_ITEMS = 8192, 192; -- 160 recasts + 32 buffs -- Ashita's LuaSocket already caps a UDP receive at 8192
 local crewParts, crewNames = {}, {};
 
 local function crewJob(v)
@@ -518,6 +536,18 @@ local function crewRefreshNames()
             if (nm ~= nil and nm ~= '') then crewNames[nm:lower()] = true; end
         end
     end
+end
+
+-- server id of a party member by lowercased name (buff timers are per member server id)
+local function partySid(key)
+    local party = mm:GetParty();
+    for i = 0, 5 do
+        if (party:GetMemberIsActive(i) ~= 0) then
+            local nm = party:GetMemberName(i);
+            if (nm ~= nil and nm:lower() == key) then return party:GetMemberServerId(i); end
+        end
+    end
+    return nil;
 end
 
 local function crewParse(msg, now)
@@ -544,23 +574,37 @@ local function crewParse(msg, now)
     crew.data[key] = e;
     e.name, e.mj, e.sj, e.t = name, mj, sj, now;
     local list, n = e.list, 0;
+    local bi, bs, nb = e.bi or {}, e.bs or {}, 0;
+    e.bi, e.bs = bi, bs;
     for i = 5, np do
-        local k, nm, sec = parts[i]:match('^([AS])(.-)=([%d%.]+)$');
-        sec = tonumber(sec);
-        if (k ~= nil and sec ~= nil and sec == sec) then
-            n = n + 1;
-            local it = list[n] or {};
-            list[n] = it;
-            it.k, it.n, it.s = k, (#nm > 48) and nm:sub(1, 48) or nm, math.min(sec, 86400);
+        local p = parts[i];
+        if (p:byte(1) == 66) then -- 'B'
+            local id, sec = p:match('^B(%d+)=(%-?%d+)$');
+            id, sec = tonumber(id), tonumber(sec);
+            if (id ~= nil and sec ~= nil and id >= 1 and id <= 1023 and sec >= -1 and nb < 32) then
+                nb = nb + 1;
+                bi[nb], bs[nb] = id, math.min(sec, 86400);
+            end
+        else
+            local k, nm, sec = p:match('^([AS])(.-)=([%d%.]+)$');
+            sec = tonumber(sec);
+            if (k ~= nil and sec ~= nil and sec == sec) then
+                n = n + 1;
+                local it = list[n] or {};
+                list[n] = it;
+                it.k, it.n, it.s = k, (#nm > 48) and nm:sub(1, 48) or nm, math.min(sec, 86400);
+            end
         end
     end
     for i = #list, n + 1, -1 do list[i] = nil; end
+    for i = #bi, nb + 1, -1 do bi[i], bs[i] = nil, nil; end
     table.sort(list, cmpRecast);
+    BT.setExact(own and mm:GetParty():GetMemberServerId(0) or partySid(key), name, bi, bs, nb, now);
 end
 
-local function hoverOn()
-    return S.crewHover and ((not S.lowfi) or S.lofiHover);
-end
+local function hoverAllowed() return (not S.lowfi) or S.lofiHover; end
+local function hoverOn() return S.crewHover and hoverAllowed(); end
+local function buffTipsOn() return S.buffTips and S.showBuffs and hoverAllowed(); end
 
 local function crewClose()
     if (crew.rx ~= nil) then crew.rx:close(); crew.rx = nil; crew.port = nil; end
@@ -568,8 +612,8 @@ local function crewClose()
 end
 
 local function crewTick(now)
-    if (not S.crewShare and not S.crewHover) then crewClose(); return; end
-    local wantRx = hoverOn();
+    if (not S.crewShare and not S.crewHover and not S.buffTips) then crewClose(); return; end
+    local wantRx = hoverOn() or buffTipsOn(); -- buff tips: crew boxes' exact timers
     if (not wantRx and crew.rx ~= nil) then crew.rx:close(); crew.rx = nil; crew.port = nil; end
     if (wantRx and crew.rx == nil and now >= crew.nextBind) then
         crew.nextBind = now + 10;
@@ -605,7 +649,8 @@ local function crewTick(now)
                 crewParse(payload, now);
             else
                 local me = crew.data[crew.selfKey or ''];
-                if (me ~= nil) then me.t = now; else crewParse(payload, now); end -- re-create after the 60 s forget
+                if (me ~= nil) then me.t = now; BT.touch(mm:GetParty():GetMemberServerId(0), now);
+                else crewParse(payload, now); end -- re-create after the 60 s forget
             end
             if (S.crewShare) then
                 if (crew.tx == nil) then
@@ -666,6 +711,33 @@ local function drawCrewTip(e, now)
         imgui.EndTable();
     end
     if (shown == 0) then imgui.TextColored(COL_READY, 'All ready'); end
+    imgui.EndTooltip();
+end
+
+-- Buff icon tip, as statustimers' (HealsCodes): 'Name (#id)', then time left. '~' = estimate.
+local function drawBuffTip(id, sid, k, now)
+    imgui.BeginTooltip();
+    imgui.Text(('%s (#%d)'):fmt(resMgr:GetString('buffs.names', id) or '?', id));
+    if (setup) then
+        imgui.TextColored(COL_DIM, 'preview');
+    else
+        local s, kind, x = BT.info(sid, id, k, now);
+        if (kind == 'exact') then
+            imgui.TextColored((s <= 10) and COL_SOON or COL_CD, fmtTime(s) .. ' left');
+        elseif (kind == 'same') then
+            imgui.TextColored(COL_TITLE, '~' .. fmtTime(s) .. ' left');
+            imgui.TextColored(COL_DIM, 'estimate: same cast as ' .. tostring(x));
+        elseif (kind == 'learned') then
+            imgui.TextColored(COL_TITLE, (s > 0) and ('~' .. fmtTime(s) .. ' left') or 'should have worn off');
+            imgui.TextColored(COL_DIM, 'estimate: lasts ' .. fmtTime(x) .. ' (seen on crew)');
+        elseif (kind == 'notimer') then
+            imgui.TextColored(COL_DIM, 'no timer');
+        elseif (kind == 'since') then
+            imgui.TextColored(COL_DIM, 'gained ' .. fmtTime(s) .. ' ago, length unknown');
+        else
+            imgui.TextColored(COL_DIM, 'time unknown (had it before tracking)');
+        end
+    end
     imgui.EndTooltip();
 end
 
@@ -993,7 +1065,7 @@ local function hideAll()
     visible = false;
     if (F == nil) then return; end
     for idx = 0, 17 do hideRow(F.rows[idx]); end
-    F.nR, F.nI, F.nHit, F.nO = 0, 0, 0, 0;
+    F.nR, F.nI, F.nHit, F.nO, F.nBuf = 0, 0, 0, 0, 0;
 end
 
 -- Font family and text size (textScale) for existing texts: run on settings load / character
@@ -1039,7 +1111,8 @@ local function initRenderer()
           RX = {}, RY = {}, RW = {}, RH = {}, RC = {}, nR = 0,
           OX = {}, OY = {}, OW = {}, OH = {}, OC = {}, nO = 0,
           IE = {}, IX = {}, IY = {}, IS = {}, IC = {}, nI = 0,
-          HX = {}, HY = {}, HW = {}, HH = {}, HN = {}, nHit = 0 };
+          HX = {}, HY = {}, HW = {}, HH = {}, HN = {}, nHit = 0,
+          BX = {}, BY = {}, BS = {}, BI = {}, BK = {}, BM = {}, nBuf = 0 }; -- buff icon hits: x, y, size, id, copy, sid
     F.dev = d3d.get_device();
     createSprite();
     -- 1x1 white texture built in code (IDirect3DDevice8::CreateTexture via Ashita d3d8 wrapper)
@@ -1074,21 +1147,25 @@ end
 -- Buff icons, 2 lines centered in the row, in READING order (left -> right, line 1 then line 2) so they
 -- read like the game's own buff bar. Buffs on the left: each line is right-aligned to the list edge.
 -- debuffLine: debuffs (tinted) end line 2, i.e. nearest the bars; overflow buffs come before them.
-local LID1, LDB1, LID2, LDB2 = {}, {}, {}, {}; -- reused line buffers (ids, debuff flags)
+local LID1, LDB1, LID2, LDB2, LK1, LK2 = {}, {}, {}, {}, {}, {}; -- reused line buffers (ids, debuff flags, copy no.)
 local n1, n2 = 0, 0;
+local curSid = 0; -- member whose icons are being laid out (hover hits)
 
-local function push(line, id, deb)
-    if (line == 1) then n1 = n1 + 1; LID1[n1], LDB1[n1] = id, deb;
-    else n2 = n2 + 1; LID2[n2], LDB2[n2] = id, deb; end
+local function push(line, id, deb, k)
+    if (line == 1) then n1 = n1 + 1; LID1[n1], LDB1[n1], LK1[n1] = id, deb, k or 1;
+    else n2 = n2 + 1; LID2[n2], LDB2[n2], LK2[n2] = id, deb, k or 1; end
 end
 
-local function drawLine(ids, debs, n, ox, y, W, s, bs)
+local function drawLine(ids, debs, ks, n, ox, y, W, s, bs)
     for j = 1, n do
         local e = getIcon(ids[j]);
         if (e ~= nil) then
             local g = S.buffGap or 6;
             local x = S.buffRight and (ox + (W + g) * s + (j - 1) * bs) or (ox - g * s - (n - j + 1) * bs);
             icon(e, x, y, bs);
+            local h = F.nBuf + 1;
+            F.nBuf = h;
+            F.BX[h], F.BY[h], F.BS[h], F.BI[h], F.BK[h], F.BM[h] = x, y, bs, ids[j], ks[j], curSid;
             if (debs[j]) then -- red frame on top of the icon edge (needs no spacing between icons)
                 local t, c = math.max(2, floor(2 * s + 0.5)), S.color.debuffBg;
                 orect(x, y, bs, t, c); orect(x, y + bs - t, bs, t, c);
@@ -1098,35 +1175,37 @@ local function drawLine(ids, debs, n, ox, y, W, s, bs)
     end
 end
 
-local function drawBuffs(list, ox, oy, rowH, W, s, cap)
+local NOK = {}; -- setup fakes carry no copy numbers
+local function drawBuffs(list, ox, oy, rowH, W, s, cap, sid)
     local b, d = list.b, list.d;
+    local bk, dk = list.bk or NOK, list.dk or NOK;
     local nb, nd = #b, #d;
     if (nb + nd == 0) then return; end
     local bs, per = math.min(S.buffSize, cap) * s, S.buffsPerRow;
-    n1, n2 = 0, 0;
+    n1, n2, curSid = 0, 0, sid or 0;
     if (nd == 0 or not S.debuffLine) then -- one stream: buffs then debuffs, wrapped over 2 lines
         local n = 0;
         for i = 1, nb + nd do
             if (n >= per * 2) then break; end
             local deb = i > nb;
-            push((n < per) and 1 or 2, deb and d[i - nb] or b[i], deb);
+            push((n < per) and 1 or 2, deb and d[i - nb] or b[i], deb, deb and dk[i - nb] or bk[i]);
             n = n + 1;
         end
     else
-        for i = 1, math.min(nb, per) do push(1, b[i], false); end   -- line 1: first buffs
+        for i = 1, math.min(nb, per) do push(1, b[i], false, bk[i]); end   -- line 1: first buffs
         local nds = math.min(nd, per);
         local room = per - nds;                                     -- line 2: overflow buffs, then debuffs
         if (S.buffRight) then                                       -- (right side: debuffs nearest the list)
-            for i = 1, nds do push(2, d[i], true); end
-            for i = per + 1, math.min(nb, per + room) do push(2, b[i], false); end
+            for i = 1, nds do push(2, d[i], true, dk[i]); end
+            for i = per + 1, math.min(nb, per + room) do push(2, b[i], false, bk[i]); end
         else
-            for i = per + 1, math.min(nb, per + room) do push(2, b[i], false); end
-            for i = 1, nds do push(2, d[i], true); end
+            for i = per + 1, math.min(nb, per + room) do push(2, b[i], false, bk[i]); end
+            for i = 1, nds do push(2, d[i], true, dk[i]); end
         end
     end
     local y1 = oy + (rowH * s - 2 * bs - s) / 2;
-    drawLine(LID1, LDB1, n1, ox, y1, W, s, bs);
-    drawLine(LID2, LDB2, n2, ox, y1 + bs + s, W, s, bs);
+    drawLine(LID1, LDB1, LK1, n1, ox, y1, W, s, bs);
+    drawLine(LID2, LDB2, LK2, n2, ox, y1 + bs + s, W, s, bs);
 end
 
 local function rangeMult(d)
@@ -1261,7 +1340,7 @@ local function layParty(R, d, ox, oy, s, sel, sub, c)
         put(R, 'zone', d.zoneName or zoneName(d.zone), nx, hy + 6 * s, fsz(10, s), 0xFF909090, nil, true);
     end
 
-    if (S.showBuffs and d.inZone and d.buffs ~= nil) then drawBuffs(d.buffs, ox, oy, P.h, W, s, 32); end
+    if (S.showBuffs and d.inZone and d.buffs ~= nil) then drawBuffs(d.buffs, ox, oy, P.h, W, s, 32, d.sid); end
     addHit(ox, oy, W * s, P.h * s, R.nmL);
 end
 
@@ -1364,7 +1443,7 @@ local function layPartyLo(R, d, ox, oy, s, sel, sub, c)
         R.hp.on, R.mp.on, R.tp.on, R.dist.on = false, false, false, false;
         put(R, 'zone', d.zoneName or zoneName(d.zone), ox + 14 * s, cy2, f10, 0xFF909090, nil, true);
     end
-    if (S.showBuffs and d.inZone and d.buffs ~= nil) then drawBuffs(d.buffs, ox, oy, PL.h, PL.w, s, 16); end
+    if (S.showBuffs and d.inZone and d.buffs ~= nil) then drawBuffs(d.buffs, ox, oy, PL.h, PL.w, s, 16, d.sid); end
     addHit(ox, oy, PL.w * s, PL.h * s, R.nmL);
 end
 
@@ -1393,7 +1472,7 @@ local function layAllyLo(R, d, ox, oy, s, sel, sub, c)
 end
 
 local function fullTick(party, c)
-    F.nR, F.nI, F.nHit, F.nO = 0, 0, 0, 0;
+    F.nR, F.nI, F.nHit, F.nO, F.nBuf = 0, 0, 0, 0, 0;
     F.budget, F.iconBudget = FONT_BUDGET, ICON_BUDGET;
     F.pass = F.pass + 1;
     iconsTrim(); -- nothing queued yet this tick
@@ -1420,6 +1499,7 @@ local function fullTick(party, c)
                     readMember(party, idx, c.myZone, entity);
                     d = D;
                     if (idx == 0) then d.buffs = selfShown; elseif (idx < 6) then d.buffs = shownBuffs[d.sid]; end
+                    if (idx > 0 and idx < 6 and not d.inZone) then BT.away(d.sid, tickNow / 1000); end
                 end
                 local sel = d.tidx ~= 0 and d.tidx == c.tMain;
                 local sub = (c.stIdx == idx) or (d.tidx ~= 0 and d.tidx == c.tSub);
@@ -1495,10 +1575,20 @@ local function drawFrame()
 end
 
 local function hoverTip()
-    if (F == nil or not hoverOn()) then return; end
+    if (F == nil) then return; end
+    local mx, my = ui.mouse_x, ui.mouse_y;
+    if (buffTipsOn()) then
+        for i = 1, F.nBuf do
+            local x, y, bs = F.BX[i], F.BY[i], F.BS[i];
+            if (mx >= x and mx < x + bs and my >= y and my < y + bs) then
+                drawBuffTip(F.BI[i], F.BM[i], F.BK[i], ashita.time.get_tick64() / 1000);
+                return;
+            end
+        end
+    end
+    if (not hoverOn()) then return; end
     for i = 1, F.nHit do
         local x, y = F.HX[i], F.HY[i];
-        local mx, my = ui.mouse_x, ui.mouse_y;
         if (mx >= x and mx < x + F.HW[i] and my >= y and my < y + F.HH[i]) then
             local e = crew.data[F.HN[i]];
             if (e ~= nil) then drawCrewTip(e, ashita.time.get_tick64() / 1000); end
@@ -1769,6 +1859,17 @@ function M.command(sub)
             tostring(crew.port), (#names > 0) and table.concat(names, ' ') or 'none'))));
         return true;
     end
+    if (sub == 'bt') then -- buff timer diagnostics: learned lengths, tracked gains ('?' unknown, '*' caster seen)
+        local out = function (m) print(chat.header(addon.name):append(chat.message(m))); end
+        local pt = mm:GetParty();
+        BT.debug(out, function (sid)
+            for i = 0, 5 do
+                if (pt:GetMemberIsActive(i) ~= 0 and pt:GetMemberServerId(i) == sid) then return pt:GetMemberName(i); end
+            end
+            return nil;
+        end);
+        return true;
+    end
     if (sub == 'tdebug') then -- target-marker diagnostics: what each check sees right now
         local t, pt = mm:GetTarget(), mm:GetParty();
         local out = function (m) print(chat.header(addon.name):append(chat.message(m))); end
@@ -1860,6 +1961,8 @@ function M.draw_options()
     if (released(changed)) then settings.save(); end
     W.tip('Buff IDs, comma separated. These are hidden; with Whitelist on, only these are shown.');
     check('Whitelist', 'whitelist', rederiveAll);
+    check('Timers on hover', 'buffTips');
+    W.tip('Hover a buff icon: name (#id), time left. Exact for you and crew boxes; others estimated (~).');
 
     W.section('Crew', 'Other goomui boxes on this PC (localhost UDP). /goomui crew = link status.');
     check('Share my recasts', 'crewShare');
@@ -1920,9 +2023,12 @@ ashita.events.register('packet_in', 'goomui_packet_in', function (e)
             zoning = true;
             hideAll();
         end
+    elseif (e.id == 0x0028) then
+        if (S.buffTips and S.showBuffs and not dupes.repeated(e)) then BT.action(e, ashita.time.get_tick64() / 1000); end
     elseif (e.id == 0x000A) then
         zoning = false;
         zoneHold = ashita.time.get_tick64() + 3000; -- skip stale pre-zone party data
+        BT.zoned(ashita.time.get_tick64() / 1000);
     end
 end);
 

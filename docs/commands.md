@@ -26,6 +26,7 @@
 | `/goomui setup` | drag boxes + list options; again (or *Save + close*) saves |
 | `/goomui lowfi` | text-only mode for this character |
 | `/goomui crew` | crew link: receive port, boxes seen |
+| `/goomui bt` | buff timers: learned lengths, tracked gains per member (`?` = unknown, `*` = caster seen) |
 | `/goomui perf` | 10 s timing report |
 | `/goomui tdebug` | target / sub-target values per party row (for a missing `>` / highlight) |
 | `/goomui tinfo` | what the target bar reads for your current target and sub-target (for a target it does not show) |
