@@ -68,3 +68,23 @@ member's row to see what is on cooldown.
 - Wire format `GMU1`: every box needs goomui 2.x (older goomUI boxes are not seen).
 - Loopback only; incoming data is checked (size, item count, member name, job ids, finite seconds).
 - Boxes silent for 60 s are dropped. `/goomui crew` shows what is seen.
+
+## Buff timers on hover
+
+Hover a buff icon (any row): `Name (#id)`, then time left. *Timers on hover* (Buffs section) turns it off; low-fi
+needs *Low-fi: allow hover*.
+
+The game sends timers for your own buffs only; other members' buffs come as ids (XiPackets 0x0076). So:
+
+| Shown | Member | From |
+|---|---|---|
+| `2:41 left` | you, crew boxes | own timers (as statustimers); crew boxes send theirs with their recasts (`B<id>=<s>`) |
+| `~2:41 left` *same cast as Name* | others | a crew box (or you) got the same buff within 2 s (same caster when known): its end time. AoE: songs, rolls, -ra |
+| `~2:41 left` *lasts 3:00* | others | the last full length seen on you / a crew box for that buff (that caster's, when seen) |
+| *gained 0:40 ago, length unknown* | others | gain seen, nothing learned for that buff yet |
+| *time unknown* | others | already on when first seen (addon load, joined, back in zone) |
+
+- Gain time: the id showing up in 0x0076, or a spell / ability landing it (0x028, so refreshes count too). 0x028 only
+  arrives in range: a refresh out of range is missed and the estimate runs short (*should have worn off*).
+- Lengths vary with the caster's gear, merits and job points: estimates are rough. Learned lengths last until unload.
+- Every box needs this goomui version for crew timers. `/goomui bt` lists learned lengths and tracked gains.
