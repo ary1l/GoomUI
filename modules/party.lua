@@ -27,6 +27,7 @@
       20.8' Cure range, 50' target .... FFXIclopedia "Distance"
 ]]--
 
+-- LuaJIT allows 200 active locals per function, this main chunk included: group new state into tables.
 require('common');
 local chat     = require('chat');
 local ffi      = require('ffi');
@@ -40,7 +41,6 @@ local W        = require('modules/widgets'); -- settings window helpers (section
 local ui       = require('modules/ui');
 local crumb    = require('modules/crumb'); -- crash marker steps (modules/crumb.lua)
 local BT       = require('modules/bufftimers'); -- buff time left for the icon hover tips
-local dupes    = require('modules/dupes'); -- resent 0x028 (modules/dupes.lua)
 
 local M = { };
 
@@ -340,8 +340,10 @@ local selfRaw, selfShown   = {}, { b = {}, d = {}, bk = {}, dk = {} };
 
 -- filtered, game order (no sorting); out.b = buffs, out.d = debuffs. Runs only when a list changes.
 -- out.bk / out.dk: which copy of its id each icon is (1, 2.. : two Marches), for the hover tip's timer.
+local derive;
+do
 local occ = {};
-local function derive(raw, out)
+function derive(raw, out)
     local nb, nd, wl, f = 0, 0, S.whitelist, S.filters;
     local ob, od, obk, odk = out.b, out.d, out.bk, out.dk;
     for k in pairs(occ) do occ[k] = nil; end
@@ -356,6 +358,7 @@ local function derive(raw, out)
     for i = #ob, nb + 1, -1 do ob[i], obk[i] = nil, nil; end
     for i = #od, nd + 1, -1 do od[i], odk[i] = nil, nil; end
     return out;
+end
 end
 
 local function newShown() return { b = {}, d = {}, bk = {}, dk = {} }; end
@@ -517,8 +520,8 @@ end
 -- B<buff id>=<s left, -1 = no timer> (own buffs, slot order; older boxes skip them), A<ability>=<s>, S<spell>=<s>.
 -- Any local program can send to these ports, so everything is validated: size, item count,
 -- name (letters, current party/alliance member only), job ids (integers 0-255), seconds (finite), buff ids 1-1023.
-local CREW_MAX_MSG, CREW_MAX_ITEMS = 8192, 192; -- 160 recasts + 32 buffs -- Ashita's LuaSocket already caps a UDP receive at 8192
-local crewParts, crewNames = {}, {};
+crew.maxMsg, crew.maxItems = 8192, 192; -- Ashita's LuaSocket already caps a UDP receive at 8192; 160 recasts + 32 buffs
+crew.parts, crew.names = {}, {};
 
 local function crewJob(v)
     v = tonumber(v);
@@ -528,35 +531,23 @@ end
 
 -- lowercased names of active party/alliance members (refreshed at most once per second, on receive)
 local function crewRefreshNames()
-    for k in pairs(crewNames) do crewNames[k] = nil; end
+    for k in pairs(crew.names) do crew.names[k] = nil; end
     local party = mm:GetParty();
     for i = 0, 17 do
         if (party:GetMemberIsActive(i) ~= 0) then
             local nm = party:GetMemberName(i);
-            if (nm ~= nil and nm ~= '') then crewNames[nm:lower()] = true; end
+            if (nm ~= nil and nm ~= '') then crew.names[nm:lower()] = true; end
         end
     end
-end
-
--- server id of a party member by lowercased name (buff timers are per member server id)
-local function partySid(key)
-    local party = mm:GetParty();
-    for i = 0, 5 do
-        if (party:GetMemberIsActive(i) ~= 0) then
-            local nm = party:GetMemberName(i);
-            if (nm ~= nil and nm:lower() == key) then return party:GetMemberServerId(i); end
-        end
-    end
-    return nil;
 end
 
 local function crewParse(msg, now)
-    if (#msg > CREW_MAX_MSG) then return; end
-    local parts, np = crewParts, 0;
+    if (#msg > crew.maxMsg) then return; end
+    local parts, np = crew.parts, 0;
     for p in msg:gmatch('[^\t]+') do
         np = np + 1;
         parts[np] = p;
-        if (np >= CREW_MAX_ITEMS + 4) then break; end
+        if (np >= crew.maxItems + 4) then break; end
     end
     if (np < 4 or parts[1] ~= 'GMU1') then return; end
     local name = parts[2];
@@ -565,7 +556,7 @@ local function crewParse(msg, now)
     local own = (msg == crew.lastPayload); -- built locally from party slot 0: no membership check
     if (not own) then
         if (now >= crew.namesNext) then crew.namesNext = now + 1; crewRefreshNames(); end
-        if (not crewNames[key]) then return; end
+        if (not crew.names[key]) then return; end
     end
     local mj, sj = crewJob(parts[3]), crewJob(parts[4]);
     if (mj == nil or sj == nil) then return; end
@@ -599,12 +590,18 @@ local function crewParse(msg, now)
     for i = #list, n + 1, -1 do list[i] = nil; end
     for i = #bi, nb + 1, -1 do bi[i], bs[i] = nil, nil; end
     table.sort(list, cmpRecast);
-    BT.setExact(own and mm:GetParty():GetMemberServerId(0) or partySid(key), name, bi, bs, nb, now);
+    local party, sid = mm:GetParty(), nil; -- buff timers are per server id: this member's, by name (party only)
+    for i = 0, 5 do
+        if (party:GetMemberIsActive(i) ~= 0) then
+            local nm = party:GetMemberName(i);
+            if (nm ~= nil and (i == 0 and own or nm:lower() == key)) then sid = party:GetMemberServerId(i); break; end
+        end
+    end
+    BT.setExact(sid, name, bi, bs, nb, now);
 end
 
-local function hoverAllowed() return (not S.lowfi) or S.lofiHover; end
-local function hoverOn() return S.crewHover and hoverAllowed(); end
-local function buffTipsOn() return S.buffTips and S.showBuffs and hoverAllowed(); end
+local function hoverOn() return S.crewHover and ((not S.lowfi) or S.lofiHover); end
+local function buffTipsOn() return S.buffTips and S.showBuffs and ((not S.lowfi) or S.lofiHover); end
 
 local function crewClose()
     if (crew.rx ~= nil) then crew.rx:close(); crew.rx = nil; crew.port = nil; end
@@ -682,16 +679,17 @@ local function fmtTime(s)
     return ('%d:%02d:%02d'):fmt(floor(s / 3600), floor(s / 60) % 60, s % 60);
 end
 
-local COL_TITLE, COL_DIM, COL_SOON, COL_CD, COL_READY = { 1, 0.85, 0.4, 1 }, { 0.55, 0.55, 0.58, 1 }, { 1, 0.8, 0, 1 }, { 0.9, 0.9, 0.92, 1 }, { 0.35, 0.85, 0.45, 1 };
-local function jobF4(id) return (S.jobColors and theme.JOB_F4[jobName(id)]) or COL_TITLE; end
+local COL = { title = { 1, 0.85, 0.4, 1 }, dim = { 0.55, 0.55, 0.58, 1 }, soon = { 1, 0.8, 0, 1 }, cd = { 0.9, 0.9, 0.92, 1 },
+              ready = { 0.35, 0.85, 0.45, 1 } };
+local function jobF4(id) return (S.jobColors and theme.JOB_F4[jobName(id)]) or COL.title; end
 local function drawCrewTip(e, now)
     local age = now - e.t;
     imgui.BeginTooltip();
-    imgui.TextColored(COL_TITLE, e.name .. '  ');
+    imgui.TextColored(COL.title, e.name .. '  ');
     imgui.SameLine(0, 0); imgui.TextColored(jobF4(e.mj), jobName(e.mj));
-    imgui.SameLine(0, 0); imgui.TextColored(COL_DIM, '/');
+    imgui.SameLine(0, 0); imgui.TextColored(COL.dim, '/');
     imgui.SameLine(0, 0); imgui.TextColored(jobF4(e.sj), jobName(e.sj));
-    if (age > 5) then imgui.TextColored(COL_DIM, ('no data for %ds'):fmt(floor(age))); end
+    if (age > 5) then imgui.TextColored(COL.dim, ('no data for %ds'):fmt(floor(age))); end
     local shown = 0;
     if (imgui.BeginTable('goomui_crew', 2, ImGuiTableFlags_SizingFixedFit)) then
         for i = 1, #e.list do
@@ -701,16 +699,16 @@ local function drawCrewTip(e, now)
                 shown = shown + 1;
                 imgui.TableNextRow();
                 imgui.TableNextColumn();
-                imgui.TextColored((it.k == 'A') and COL_CD or COL_DIM, it.n);
+                imgui.TextColored((it.k == 'A') and COL.cd or COL.dim, it.n);
                 imgui.TableNextColumn();
                 local whole = floor(rem + 0.5);
                 if (it.fs ~= whole) then it.fs, it.ft = whole, fmtTime(rem); end
-                imgui.TextColored((rem <= 10) and COL_SOON or COL_CD, it.ft);
+                imgui.TextColored((rem <= 10) and COL.soon or COL.cd, it.ft);
             end
         end
         imgui.EndTable();
     end
-    if (shown == 0) then imgui.TextColored(COL_READY, 'All ready'); end
+    if (shown == 0) then imgui.TextColored(COL.ready, 'All ready'); end
     imgui.EndTooltip();
 end
 
@@ -719,23 +717,23 @@ local function drawBuffTip(id, sid, k, now)
     imgui.BeginTooltip();
     imgui.Text(('%s (#%d)'):fmt(resMgr:GetString('buffs.names', id) or '?', id));
     if (setup) then
-        imgui.TextColored(COL_DIM, 'preview');
+        imgui.TextColored(COL.dim, 'preview');
     else
         local s, kind, x = BT.info(sid, id, k, now);
         if (kind == 'exact') then
-            imgui.TextColored((s <= 10) and COL_SOON or COL_CD, fmtTime(s) .. ' left');
+            imgui.TextColored((s <= 10) and COL.soon or COL.cd, fmtTime(s) .. ' left');
         elseif (kind == 'same') then
-            imgui.TextColored(COL_TITLE, '~' .. fmtTime(s) .. ' left');
-            imgui.TextColored(COL_DIM, 'estimate: same cast as ' .. tostring(x));
+            imgui.TextColored(COL.title, '~' .. fmtTime(s) .. ' left');
+            imgui.TextColored(COL.dim, 'estimate: same cast as ' .. tostring(x));
         elseif (kind == 'learned') then
-            imgui.TextColored(COL_TITLE, (s > 0) and ('~' .. fmtTime(s) .. ' left') or 'should have worn off');
-            imgui.TextColored(COL_DIM, 'estimate: lasts ' .. fmtTime(x) .. ' (seen on crew)');
+            imgui.TextColored(COL.title, (s > 0) and ('~' .. fmtTime(s) .. ' left') or 'should have worn off');
+            imgui.TextColored(COL.dim, 'estimate: lasts ' .. fmtTime(x) .. ' (seen on crew)');
         elseif (kind == 'notimer') then
-            imgui.TextColored(COL_DIM, 'no timer');
+            imgui.TextColored(COL.dim, 'no timer');
         elseif (kind == 'since') then
-            imgui.TextColored(COL_DIM, 'gained ' .. fmtTime(s) .. ' ago, length unknown');
+            imgui.TextColored(COL.dim, 'gained ' .. fmtTime(s) .. ' ago, length unknown');
         else
-            imgui.TextColored(COL_DIM, 'time unknown (had it before tracking)');
+            imgui.TextColored(COL.dim, 'time unknown (had it before tracking)');
         end
     end
     imgui.EndTooltip();
@@ -745,8 +743,11 @@ end
 -- renderer: sprite (bars/icons/borders) then ManualRender Ashita fonts
 -------------------------------------------------------------------------------
 local F = nil;
-local ICON_MAX  = 128; -- soft cap: past it, icons unused for ICON_IDLE drawn passes are released
-local ICON_IDLE = 200; -- fullTick passes (~10 s at 50 ms); passes, not time, so hiding the list ages nothing
+-- renderer limits
+--   iconMax:   icon cache soft cap: past it, icons unused for iconIdle drawn passes are released
+--   iconIdle:  fullTick passes (~10 s at 50 ms); passes, not time, so hiding the list ages nothing
+--   fontBudget / iconBudget: max new text objects / icon textures per tick; rebuilds: text rebuilds per frame
+local K = { iconMax = 128, iconIdle = 200, fontBudget = 8, iconBudget = 4, rebuilds = 3 };
 local ICON_OVERRIDE = { [623] = 62 }; -- XIUI: Rampart shows BCNM icon
 local gdiFailed = false; -- gdifonts DLL / font manager unavailable: bars and icons still draw, no text
 
@@ -758,10 +759,10 @@ local function iconsClear()
 end
 
 -- Old behaviour flushed the whole cache past 64 ids, so every visible icon blinked out and was
--- reloaded 4 per tick. Now only icons idle for ICON_IDLE drawn passes go, and the cap is soft.
+-- reloaded 4 per tick. Now only icons idle for K.iconIdle drawn passes go, and the cap is soft.
 local function iconsTrim()
-    if (F.iconCount <= ICON_MAX) then return; end
-    local cut = F.pass - ICON_IDLE;
+    if (F.iconCount <= K.iconMax) then return; end
+    local cut = F.pass - K.iconIdle;
     for id, e in pairs(F.icons) do
         if (e and e.used < cut) then
             e.tex:Release();
@@ -912,12 +913,9 @@ end
 -- text object: gdifonts object (manual: not in gdifonts' own render list) + cached props.
 -- Texture is (re)built by GDI+ inside put() -> cost shows up in tick timing; old texture released explicitly.
 local gdi = nil; -- lazy require (in initRenderer)
-local FONT_BUDGET = 8;     -- max new text objects per tick
-local ICON_BUDGET = 4;     -- max new icon textures per tick
--- Text texture rebuilds (GDI+ in gdifonts' DLL) run in present(), at most REBUILD_PER_FRAME a frame, oldest change
+-- Text texture rebuilds (GDI+ in gdifonts' DLL) run in present(), at most K.rebuilds a frame, oldest change
 -- first. They used to run in the tick, up to 60 in one frame on a low-fi tick (budget = tick length * 240/s), which
 -- showed up as 10-20 ms frames in combat.
-local REBUILD_PER_FRAME = 3;
 local function gdiH(h) return floor(h * S.textScale * 1.3 + 0.5); end -- gdifonts px vs old Ashita sizes
 local VC_FIX = 0.6; -- vertical-centering correction (fraction of font px)
 
@@ -944,7 +942,7 @@ end
 -- rebuilds the oldest tickets each frame and puts the text back in place, so no text starves whatever the put()
 -- order and the old texture stays on screen until then. A failed build keeps the old texture and retries in 1 s
 -- (gdifonts clears is_dirty before building, so a failure used to blank the text until its text changed). Old
--- textures are released explicitly. First builds (o.tex == nil) run at once: FONT_BUDGET new objects per tick.
+-- textures are released explicitly. First builds (o.tex == nil) run at once: K.fontBudget new objects per tick.
 local function buildTex(o)
     local g = o.g;
     o.ticket = nil;
@@ -1106,7 +1104,7 @@ local function initRenderer()
             print(chat.header(addon.name):append(chat.error('gdifonts failed to load; text disabled: ' .. tostring(lib))));
         end
     end
-    F = { rows = {}, texts = {}, icons = {}, iconCount = 0, selfNext = 0, budget = FONT_BUDGET, iconBudget = ICON_BUDGET,
+    F = { rows = {}, texts = {}, icons = {}, iconCount = 0, selfNext = 0, budget = K.fontBudget, iconBudget = K.iconBudget,
           ticketNext = 1, spriteRetry = 0, pass = 0,
           RX = {}, RY = {}, RW = {}, RH = {}, RC = {}, nR = 0,
           OX = {}, OY = {}, OW = {}, OH = {}, OC = {}, nO = 0,
@@ -1147,16 +1145,18 @@ end
 -- Buff icons, 2 lines centered in the row, in READING order (left -> right, line 1 then line 2) so they
 -- read like the game's own buff bar. Buffs on the left: each line is right-aligned to the list edge.
 -- debuffLine: debuffs (tinted) end line 2, i.e. nearest the bars; overflow buffs come before them.
-local LID1, LDB1, LID2, LDB2, LK1, LK2 = {}, {}, {}, {}, {}, {}; -- reused line buffers (ids, debuff flags, copy no.)
-local n1, n2 = 0, 0;
-local curSid = 0; -- member whose icons are being laid out (hover hits)
+-- reused line buffers: per line ids, debuff flags, copy no. (k), count; sid = member being laid out (hover hits);
+-- nok = no copy numbers (setup fakes)
+local LB = { { id = {}, db = {}, k = {}, n = 0 }, { id = {}, db = {}, k = {}, n = 0 }, sid = 0, nok = {} };
 
 local function push(line, id, deb, k)
-    if (line == 1) then n1 = n1 + 1; LID1[n1], LDB1[n1], LK1[n1] = id, deb, k or 1;
-    else n2 = n2 + 1; LID2[n2], LDB2[n2], LK2[n2] = id, deb, k or 1; end
+    local L = LB[line];
+    local n = L.n + 1;
+    L.n, L.id[n], L.db[n], L.k[n] = n, id, deb, k or 1;
 end
 
-local function drawLine(ids, debs, ks, n, ox, y, W, s, bs)
+local function drawLine(L, ox, y, W, s, bs)
+    local ids, debs, ks, n = L.id, L.db, L.k, L.n;
     for j = 1, n do
         local e = getIcon(ids[j]);
         if (e ~= nil) then
@@ -1165,7 +1165,7 @@ local function drawLine(ids, debs, ks, n, ox, y, W, s, bs)
             icon(e, x, y, bs);
             local h = F.nBuf + 1;
             F.nBuf = h;
-            F.BX[h], F.BY[h], F.BS[h], F.BI[h], F.BK[h], F.BM[h] = x, y, bs, ids[j], ks[j], curSid;
+            F.BX[h], F.BY[h], F.BS[h], F.BI[h], F.BK[h], F.BM[h] = x, y, bs, ids[j], ks[j], LB.sid;
             if (debs[j]) then -- red frame on top of the icon edge (needs no spacing between icons)
                 local t, c = math.max(2, floor(2 * s + 0.5)), S.color.debuffBg;
                 orect(x, y, bs, t, c); orect(x, y + bs - t, bs, t, c);
@@ -1175,14 +1175,13 @@ local function drawLine(ids, debs, ks, n, ox, y, W, s, bs)
     end
 end
 
-local NOK = {}; -- setup fakes carry no copy numbers
 local function drawBuffs(list, ox, oy, rowH, W, s, cap, sid)
     local b, d = list.b, list.d;
-    local bk, dk = list.bk or NOK, list.dk or NOK;
+    local bk, dk = list.bk or LB.nok, list.dk or LB.nok;
     local nb, nd = #b, #d;
     if (nb + nd == 0) then return; end
     local bs, per = math.min(S.buffSize, cap) * s, S.buffsPerRow;
-    n1, n2, curSid = 0, 0, sid or 0;
+    LB[1].n, LB[2].n, LB.sid = 0, 0, sid or 0;
     if (nd == 0 or not S.debuffLine) then -- one stream: buffs then debuffs, wrapped over 2 lines
         local n = 0;
         for i = 1, nb + nd do
@@ -1204,8 +1203,8 @@ local function drawBuffs(list, ox, oy, rowH, W, s, cap, sid)
         end
     end
     local y1 = oy + (rowH * s - 2 * bs - s) / 2;
-    drawLine(LID1, LDB1, LK1, n1, ox, y1, W, s, bs);
-    drawLine(LID2, LDB2, LK2, n2, ox, y1 + bs + s, W, s, bs);
+    drawLine(LB[1], ox, y1, W, s, bs);
+    drawLine(LB[2], ox, y1 + bs + s, W, s, bs);
 end
 
 local function rangeMult(d)
@@ -1473,7 +1472,7 @@ end
 
 local function fullTick(party, c)
     F.nR, F.nI, F.nHit, F.nO, F.nBuf = 0, 0, 0, 0, 0;
-    F.budget, F.iconBudget = FONT_BUDGET, ICON_BUDGET;
+    F.budget, F.iconBudget = K.fontBudget, K.iconBudget;
     F.pass = F.pass + 1;
     iconsTrim(); -- nothing queued yet this tick
     local entity = S.showDist and mm:GetEntity() or nil;
@@ -1568,7 +1567,7 @@ end
 -- Queued text rebuilds (a few a frame), then the sprite pass: /goomui perf's draw time includes both.
 local function drawFrame()
     if (not gdiFailed) then
-        local ok, err = xpcall(serveTexts, debug.traceback, REBUILD_PER_FRAME);
+        local ok, err = xpcall(serveTexts, debug.traceback, K.rebuilds);
         if (not ok) then reportErr('text', err); end
     end
     draw();
@@ -2024,7 +2023,7 @@ ashita.events.register('packet_in', 'goomui_packet_in', function (e)
             hideAll();
         end
     elseif (e.id == 0x0028) then
-        if (S.buffTips and S.showBuffs and not dupes.repeated(e)) then BT.action(e, ashita.time.get_tick64() / 1000); end
+        if (S.buffTips and S.showBuffs) then BT.action(e, ashita.time.get_tick64() / 1000); end
     elseif (e.id == 0x000A) then
         zoning = false;
         zoneHold = ashita.time.get_tick64() + 3000; -- skip stale pre-zone party data

@@ -20,6 +20,7 @@
 
 require('common');
 local parse_action = require('modules/action');
+local dupes = require('modules/dupes'); -- resent 0x028 (modules/dupes.lua)
 
 local M = {};
 
@@ -152,6 +153,7 @@ end
 function M.action(e, now)
     if (e.size == nil or e.size < 11) then return; end
     if (not CATS[ashita.bits.unpack_be(e.data_raw, 0, 82, 4)]) then return; end -- cmd_no (action.lua layout)
+    if (dupes.repeated(e)) then return; end
     local ok, a = pcall(parse_action, e);
     if (not ok or a == nil) then return; end
     for t = 1, #a.targets do
